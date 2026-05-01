@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard'
 import Downloads from './pages/Downloads'
 import Movies from './pages/Movies'
 import TVShows from './pages/TVShows'
+import Requests from './pages/Requests'
 import Settings from './pages/Settings'
 import Layout from './components/Layout'
 
@@ -37,6 +38,7 @@ function AppRoutes() {
         <Route path="downloads" element={<Downloads />} />
         <Route path="movies" element={<Movies />} />
         <Route path="tv" element={<TVShows />} />
+        <Route path="requests" element={<Requests />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
