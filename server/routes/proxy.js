@@ -8,9 +8,13 @@ const AUTH_HEADER = {
   bazarr:    (key) => ({ 'X-Api-Key': key }),
   prowlarr:  (key) => ({ 'X-Api-Key': key }),
   overseerr: (key) => ({ 'X-Api-Key': key }),
-  jackett:   (key) => ({ 'X-Api-Key': key }),
   huntarr:   (key) => ({ 'X-Api-Key': key }),
   plex:      (key) => ({ 'X-Plex-Token': key }),
+}
+
+// Services that use a query param for auth instead of a header
+const AUTH_QUERY: Record<string, string> = {
+  jackett: 'apikey',
 }
 
 export default async function proxyRoutes(fastify) {
@@ -27,18 +31,20 @@ export default async function proxyRoutes(fastify) {
       const svc = config.services[service]
       if (!svc?.enabled) return reply.status(400).send({ error: `${service} is not enabled` })
 
+      const authQueryParam = AUTH_QUERY[service]
       const authFn = AUTH_HEADER[service]
-      if (!authFn) return reply.status(400).send({ error: `Unknown service: ${service}` })
+      if (!authFn && !authQueryParam) return reply.status(400).send({ error: `Unknown service: ${service}` })
 
       const baseUrl = svc.url.replace(/\/$/, '')
-      const qs = Object.keys(request.query || {}).length
-        ? '?' + new URLSearchParams(request.query).toString()
-        : ''
+      const queryObj = { ...(request.query || {}) }
+      if (authQueryParam) queryObj[authQueryParam] = svc.apiKey
+      const qs = Object.keys(queryObj).length ? '?' + new URLSearchParams(queryObj).toString() : ''
       const targetUrl = `${baseUrl}/${path}${qs}`
 
+      const authHeaders = authFn ? authFn(svc.apiKey) : {}
       const options = {
         method: request.method,
-        headers: { ...authFn(svc.apiKey), 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: { ...authHeaders, 'Content-Type': 'application/json', Accept: 'application/json' },
         signal: AbortSignal.timeout(20000),
       }
       if ((request.method === 'POST' || request.method === 'PUT') && request.body != null) {

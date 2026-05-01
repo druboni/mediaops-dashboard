@@ -8,6 +8,7 @@ import Downloads from './pages/Downloads'
 import Movies from './pages/Movies'
 import TVShows from './pages/TVShows'
 import Requests from './pages/Requests'
+import Indexers from './pages/Indexers'
 import Settings from './pages/Settings'
 import Layout from './components/Layout'
 
@@ -39,6 +40,7 @@ function AppRoutes() {
         <Route path="movies" element={<Movies />} />
         <Route path="tv" element={<TVShows />} />
         <Route path="requests" element={<Requests />} />
+        <Route path="indexers" element={<Indexers />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
