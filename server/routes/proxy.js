@@ -21,7 +21,7 @@ export default async function proxyRoutes(fastify) {
   fastify.addHook('preHandler', requireAuth)
 
   fastify.route({
-    method: ['GET', 'POST', 'PUT', 'DELETE'],
+    method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     url: '/:service/*',
     handler: async (request, reply) => {
       const { service } = request.params
@@ -47,7 +47,7 @@ export default async function proxyRoutes(fastify) {
         headers: { ...authHeaders, 'Content-Type': 'application/json', Accept: 'application/json' },
         signal: AbortSignal.timeout(20000),
       }
-      if ((request.method === 'POST' || request.method === 'PUT') && request.body != null) {
+      if (['POST', 'PUT', 'PATCH'].includes(request.method) && request.body != null) {
         options.body = JSON.stringify(request.body)
       }
 
