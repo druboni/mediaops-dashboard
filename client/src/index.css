@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .input {
+    @apply bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500;
+  }
+  .section-label {
+    @apply text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3;
+  }
+}

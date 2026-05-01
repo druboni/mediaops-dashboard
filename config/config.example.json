@@ -1,0 +1,16 @@
+{
+  "services": {
+    "plex":        { "enabled": false, "url": "http://localhost:32400", "apiKey": "" },
+    "sonarr":      { "enabled": false, "url": "http://localhost:8989",  "apiKey": "" },
+    "radarr":      { "enabled": false, "url": "http://localhost:7878",  "apiKey": "" },
+    "lidarr":      { "enabled": false, "url": "http://localhost:8686",  "apiKey": "" },
+    "bazarr":      { "enabled": false, "url": "http://localhost:6767",  "apiKey": "" },
+    "overseerr":   { "enabled": false, "url": "http://localhost:5055",  "apiKey": "" },
+    "prowlarr":    { "enabled": false, "url": "http://localhost:9696",  "apiKey": "" },
+    "jackett":     { "enabled": false, "url": "http://localhost:9117",  "apiKey": "" },
+    "qbittorrent": { "enabled": false, "url": "http://localhost:8080",  "apiKey": "" },
+    "nzbget":      { "enabled": false, "url": "http://localhost:6789",  "apiKey": "" },
+    "huntarr":     { "enabled": false, "url": "http://localhost:9705",  "apiKey": "" },
+    "requestrr":   { "enabled": false, "url": "http://localhost:4545",  "apiKey": "" }
+  }
+}
