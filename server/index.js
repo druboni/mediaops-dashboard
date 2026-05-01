@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.js'
 import configRoutes from './routes/config.js'
 import servicesRoutes from './routes/services.js'
 import dashboardRoutes from './routes/dashboard.js'
+import downloadsRoutes from './routes/downloads.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -26,6 +27,7 @@ await fastify.register(authRoutes, { prefix: '/api/auth' })
 await fastify.register(configRoutes, { prefix: '/api/config' })
 await fastify.register(servicesRoutes, { prefix: '/api/services' })
 await fastify.register(dashboardRoutes, { prefix: '/api/dashboard' })
+await fastify.register(downloadsRoutes, { prefix: '/api/downloads' })
 
 if (fs.existsSync(distPath)) {
   await fastify.register(staticFiles, {
