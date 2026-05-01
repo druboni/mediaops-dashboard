@@ -5,6 +5,8 @@ import { ConfigProvider } from './store/config'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Downloads from './pages/Downloads'
+import Movies from './pages/Movies'
+import TVShows from './pages/TVShows'
 import Settings from './pages/Settings'
 import Layout from './components/Layout'
 
@@ -33,6 +35,8 @@ function AppRoutes() {
       >
         <Route index element={<Dashboard />} />
         <Route path="downloads" element={<Downloads />} />
+        <Route path="movies" element={<Movies />} />
+        <Route path="tv" element={<TVShows />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
