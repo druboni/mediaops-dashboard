@@ -34,7 +34,8 @@ interface DashboardData {
 function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec >= 1_048_576) return `${(bytesPerSec / 1_048_576).toFixed(1)} MB/s`
   if (bytesPerSec >= 1024) return `${Math.round(bytesPerSec / 1024)} KB/s`
-  return '0 KB/s'
+  if (bytesPerSec > 0) return `${bytesPerSec} B/s`
+  return '0'
 }
 
 function timeAgo(dateStr: string): string {
@@ -76,7 +77,7 @@ export default function Dashboard() {
       const res = await api.get<DashboardData>('/dashboard')
       return res.data
     },
-    refetchInterval: 30_000,
+    refetchInterval: 10_000,
     enabled: enabledServices.length > 0,
   })
 
@@ -354,16 +355,23 @@ function StatCard({ label, value, highlight = false }: { label: string; value: n
 function DownloadRow({ label, ok, dlSpeed, upSpeed, active }: {
   label: string; ok: boolean; dlSpeed: number; upSpeed?: number; active: number
 }) {
+  const idle = active === 0 && dlSpeed === 0
   return (
     <div className="px-4 py-3 flex items-center justify-between">
       <div className="flex items-center gap-2">
         <span className={`w-1.5 h-1.5 rounded-full ${ok ? 'bg-green-400' : 'bg-red-500'}`} />
         <span className="text-sm text-white">{label}</span>
-        <span className="text-xs text-gray-500">{active} active</span>
+        {!idle && <span className="text-xs text-gray-500">{active} active</span>}
       </div>
-      <div className="flex gap-4 text-xs text-gray-400">
-        <span className="text-green-400">↓ {formatSpeed(dlSpeed)}</span>
-        {upSpeed !== undefined && <span className="text-blue-400">↑ {formatSpeed(upSpeed)}</span>}
+      <div className="flex gap-4 text-xs">
+        {idle ? (
+          <span className="text-gray-600">Idle</span>
+        ) : (
+          <>
+            <span className="text-green-400">↓ {formatSpeed(dlSpeed)}</span>
+            {upSpeed !== undefined && <span className="text-blue-400">↑ {formatSpeed(upSpeed)}</span>}
+          </>
+        )}
       </div>
     </div>
   )
