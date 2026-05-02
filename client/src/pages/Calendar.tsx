@@ -24,15 +24,21 @@ class CalendarErrorBoundary extends Component<{ children: ReactNode }, { error: 
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+interface SonarrSeries {
+  id: number
+  title: string
+  network?: string
+}
+
 interface SonarrEpisode {
   id: number
+  seriesId: number
   title: string
   seasonNumber: number
   episodeNumber: number
   airDate: string
   hasFile: boolean
-  series?: { id: number; title: string; network?: string }
-  seriesTitle?: string
+  series?: SonarrSeries
   overview?: string
 }
 
@@ -71,7 +77,7 @@ function dayLabel(dateStr: string) {
 // ── Row components ─────────────────────────────────────────────────────────
 
 function EpisodeRow({ ep }: { ep: SonarrEpisode }) {
-  const showTitle = ep.series?.title || ep.seriesTitle || 'Unknown Series'
+  const showTitle = ep.series?.title || 'Unknown Series'
   const network = ep.series?.network
   return (
     <div className="px-4 py-3 flex items-center gap-3">
@@ -141,6 +147,19 @@ function CalendarInner() {
   const endDate = new Date(today); endDate.setDate(today.getDate() + range)
   const endStr = toLocalDateStr(endDate)
 
+  const { data: seriesList = [], isLoading: seriesLoading } = useQuery<SonarrSeries[]>({
+    queryKey: ['sonarr-series'],
+    queryFn: async () => (await api.get('/proxy/sonarr/api/v3/series')).data,
+    enabled: hasSonarr,
+    staleTime: 3_600_000,
+  })
+
+  const seriesMap = useMemo(() => {
+    const m = new Map<number, SonarrSeries>()
+    for (const s of seriesList) m.set(s.id, s)
+    return m
+  }, [seriesList])
+
   const { data: episodes = [], isLoading: epLoading } = useQuery<SonarrEpisode[]>({
     queryKey: ['sonarr-calendar', startStr, endStr],
     queryFn: async () => (await api.get('/proxy/sonarr/api/v3/calendar', {
@@ -166,7 +185,8 @@ function CalendarInner() {
       if (!ep.airDate) continue
       const d = ep.airDate.split('T')[0]
       if (!map.has(d)) map.set(d, [])
-      map.get(d)!.push({ kind: 'episode', date: d, data: ep })
+      const enriched = { ...ep, series: seriesMap.get(ep.seriesId) ?? ep.series }
+      map.get(d)!.push({ kind: 'episode', date: d, data: enriched })
     }
 
     const addMovie = (movie: RadarrMovie, dateField: string | undefined, releaseType: ReleaseType) => {
@@ -186,9 +206,9 @@ function CalendarInner() {
     return [...map.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, items]) => ({ date, items }))
-  }, [episodes, movies, startStr, endStr])
+  }, [episodes, movies, seriesMap, startStr, endStr])
 
-  const isLoading = (hasSonarr && epLoading) || (hasRadarr && movLoading)
+  const isLoading = (hasSonarr && (epLoading || seriesLoading)) || (hasRadarr && movLoading)
   const totalItems = grouped.reduce((n, g) => n + g.items.length, 0)
 
   if (!hasSonarr && !hasRadarr) {
