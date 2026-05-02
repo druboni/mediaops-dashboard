@@ -4,7 +4,7 @@ export type Theme = 'default' | 'cyberpunk'
 
 export const THEMES: { id: Theme; label: string; accent: string }[] = [
   { id: 'default',   label: 'Default',   accent: '#3b82f6' },
-  { id: 'cyberpunk', label: 'Cyberpunk', accent: '#00f5d4' },
+  { id: 'cyberpunk', label: 'Cyberpunk', accent: '#FCE303' },
 ]
 
 const Ctx = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
