@@ -1,7 +1,26 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Component } from 'react'
+import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
+
+class CalendarErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(err: Error) { return { error: err.message } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="p-6">
+          <h1 className="text-2xl font-bold text-white mb-4">Calendar</h1>
+          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 text-sm font-mono">
+            {this.state.error}
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -12,7 +31,8 @@ interface SonarrEpisode {
   episodeNumber: number
   airDate: string
   hasFile: boolean
-  series: { id: number; title: string; network?: string }
+  series?: { id: number; title: string; network?: string }
+  seriesTitle?: string
   overview?: string
 }
 
@@ -51,19 +71,21 @@ function dayLabel(dateStr: string) {
 // ── Row components ─────────────────────────────────────────────────────────
 
 function EpisodeRow({ ep }: { ep: SonarrEpisode }) {
+  const showTitle = ep.series?.title || ep.seriesTitle || 'Unknown Series'
+  const network = ep.series?.network
   return (
     <div className="px-4 py-3 flex items-center gap-3">
       <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-green-900/60 text-green-300 shrink-0">TV</span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-white truncate">{ep.series.title}</p>
+        <p className="text-sm font-medium text-white truncate">{showTitle}</p>
         <p className="text-xs text-gray-400 truncate">
-          S{String(ep.seasonNumber).padStart(2, '0')}E{String(ep.episodeNumber).padStart(2, '0')}
+          S{String(ep.seasonNumber ?? 0).padStart(2, '0')}E{String(ep.episodeNumber ?? 0).padStart(2, '0')}
           {ep.title ? ` · ${ep.title}` : ''}
         </p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        {ep.series.network && (
-          <span className="text-xs text-gray-600 hidden sm:block">{ep.series.network}</span>
+        {network && (
+          <span className="text-xs text-gray-600 hidden sm:block">{network}</span>
         )}
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
           ep.hasFile ? 'bg-green-900/40 text-green-400' : 'bg-gray-800 text-gray-500'
@@ -105,6 +127,10 @@ function MovieRow({ movie, releaseType }: { movie: RadarrMovie; releaseType: Rel
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function Calendar() {
+  return <CalendarErrorBoundary><CalendarInner /></CalendarErrorBoundary>
+}
+
+function CalendarInner() {
   const { enabledServices } = useConfig()
   const hasSonarr = enabledServices.includes('sonarr')
   const hasRadarr = enabledServices.includes('radarr')
