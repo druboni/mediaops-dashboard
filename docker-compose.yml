@@ -9,4 +9,5 @@ services:
     environment:
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - NODE_ENV=production
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
     restart: unless-stopped

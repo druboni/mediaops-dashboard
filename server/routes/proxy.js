@@ -1,5 +1,6 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
+import { addLog } from '../logBuffer.js'
 
 const AUTH_HEADER = {
   sonarr:    (key) => ({ 'X-Api-Key': key }),
@@ -53,10 +54,16 @@ export default async function proxyRoutes(fastify) {
 
       try {
         const res = await fetch(targetUrl, options)
+        addLog(res.ok ? 'info' : 'warn', `[proxy:${service}] ${options.method} /${path} → ${res.status}`, {
+          service, status: res.status, url: targetUrl,
+        })
         reply.status(res.status)
         const ct = res.headers.get('content-type') || ''
         return reply.send(ct.includes('application/json') ? await res.json() : await res.text())
       } catch (err) {
+        addLog('error', `[proxy:${service}] ${options.method} /${path} → ${err.message}`, {
+          service, error: err.message, url: targetUrl,
+        })
         return reply.status(502).send({ error: err.message })
       }
     },

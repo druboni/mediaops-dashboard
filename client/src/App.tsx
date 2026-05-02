@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './store/auth'
 import { ConfigProvider } from './store/config'
+import { ThemeProvider } from './store/theme'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Downloads from './pages/Downloads'
@@ -14,6 +15,7 @@ import Subtitles from './pages/Subtitles'
 import Activity from './pages/Activity'
 import Hunt from './pages/Hunt'
 import Settings from './pages/Settings'
+import Logs from './pages/Logs'
 import Layout from './components/Layout'
 
 const queryClient = new QueryClient()
@@ -50,6 +52,7 @@ function AppRoutes() {
         <Route path="activity" element={<Activity />} />
         <Route path="hunt" element={<Hunt />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="logs" element={<Logs />} />
       </Route>
     </Routes>
   )
@@ -59,11 +62,13 @@ export default function App() {
   return (
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <ConfigProvider>
-            <AppRoutes />
-          </ConfigProvider>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <ConfigProvider>
+              <AppRoutes />
+            </ConfigProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </QueryClientProvider>
     </BrowserRouter>
   )

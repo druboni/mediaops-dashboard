@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useConfig } from '../store/config'
 import { useAuth } from '../store/auth'
+import { useTheme, THEMES } from '../store/theme'
 import type { ServiceName } from '../types'
 
 interface NavItem {
@@ -52,9 +53,15 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
-export default function Sidebar() {
+interface SidebarProps {
+  open: boolean
+  onClose: () => void
+}
+
+export default function Sidebar({ open, onClose }: SidebarProps) {
   const { enabledServices } = useConfig()
   const { logout } = useAuth()
+  const { theme, setTheme } = useTheme()
   const location = useLocation()
 
   const isVisible = (item: NavItem) => {
@@ -66,14 +73,21 @@ export default function Sidebar() {
   const isActive = (path: string) => location.pathname === path
 
   return (
-    <aside className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col h-screen fixed left-0 top-0">
+    <aside
+      className={`
+        w-56 bg-gray-900 border-r border-gray-800 flex flex-col h-screen fixed left-0 top-0 z-50
+        transition-transform duration-200 ease-in-out
+        ${open ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0
+      `}
+    >
       <div className="px-4 py-5 border-b border-gray-800">
         <span className="text-white font-bold text-lg tracking-tight">MediaOps</span>
         <p className="text-gray-600 text-xs mt-0.5">developed by Brian</p>
       </div>
 
       <nav className="flex-1 overflow-y-auto py-2">
-        <NavLink path="/" label="Dashboard" active={isActive('/')} />
+        <NavLink path="/" label="Dashboard" active={isActive('/')} onNavigate={onClose} />
 
         {NAV_SECTIONS.map((section) => {
           const visible = section.items.filter(isVisible)
@@ -84,7 +98,13 @@ export default function Sidebar() {
                 {section.label}
               </p>
               {visible.map((item) => (
-                <NavLink key={item.path} path={item.path} label={item.label} active={isActive(item.path)} />
+                <NavLink
+                  key={item.path}
+                  path={item.path}
+                  label={item.label}
+                  active={isActive(item.path)}
+                  onNavigate={onClose}
+                />
               ))}
             </div>
           )
@@ -92,7 +112,27 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-gray-800 py-2">
-        <NavLink path="/settings" label="Settings" active={isActive('/settings')} />
+        <NavLink path="/settings" label="Settings" active={isActive('/settings')} onNavigate={onClose} />
+        <NavLink path="/logs"     label="Logs"     active={isActive('/logs')}     onNavigate={onClose} />
+
+        {/* Theme picker */}
+        <div className="flex items-center gap-2 px-4 py-3">
+          <span className="text-xs text-gray-500 uppercase tracking-wider flex-1">Theme</span>
+          {THEMES.map((t) => (
+            <button
+              key={t.id}
+              title={t.label}
+              onClick={() => setTheme(t.id)}
+              className="w-5 h-5 rounded-full border-2 transition-all"
+              style={{
+                backgroundColor: t.accent,
+                borderColor: theme === t.id ? '#fff' : 'transparent',
+                boxShadow: theme === t.id ? `0 0 6px ${t.accent}` : 'none',
+              }}
+            />
+          ))}
+        </div>
+
         <button
           onClick={logout}
           className="flex w-full items-center px-4 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
@@ -104,10 +144,18 @@ export default function Sidebar() {
   )
 }
 
-function NavLink({ path, label, active }: { path: string; label: string; active: boolean }) {
+function NavLink({
+  path, label, active, onNavigate,
+}: {
+  path: string
+  label: string
+  active: boolean
+  onNavigate: () => void
+}) {
   return (
     <Link
       to={path}
+      onClick={onNavigate}
       className={`flex items-center px-4 py-2 text-sm transition-colors ${
         active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
       }`}

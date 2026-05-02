@@ -122,12 +122,15 @@ async function getPlexData(url, token) {
   }
 }
 
-async function getQbitData(url, password) {
+async function getQbitData(url, userpass) {
   try {
+    const sep = (userpass || '').indexOf(':')
+    const username = sep > -1 ? userpass.slice(0, sep) : 'admin'
+    const password = sep > -1 ? userpass.slice(sep + 1) : (userpass || '')
     const loginRes = await fetch(`${url}/api/v2/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `username=admin&password=${encodeURIComponent(password)}`,
+      body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
       signal: AbortSignal.timeout(5000),
     })
     const loginText = await loginRes.text()
@@ -155,7 +158,7 @@ async function getQbitData(url, password) {
 async function getNzbgetData(url, userpass) {
   const sep = (userpass || '').indexOf(':')
   const user = sep > -1 ? userpass.slice(0, sep) : 'nzbget'
-  const pass = sep > -1 ? userpass.slice(sep + 1) : (userpass || 'tegbzn6789')
+  const pass = sep > -1 ? userpass.slice(sep + 1) : (userpass || '')
   const auth = Buffer.from(`${user}:${pass}`).toString('base64')
 
   const r = await safeFetch(`${url}/jsonrpc`, {

@@ -19,7 +19,7 @@ const SERVICE_META: Record<ServiceName, ServiceMeta> = {
   overseerr:   { label: 'Overseerr',    category: 'Requests',         placeholder: 'http://192.168.1.x:5055',  keyLabel: 'API Key' },
   prowlarr:    { label: 'Prowlarr',     category: 'Indexers',         placeholder: 'http://192.168.1.x:9696',  keyLabel: 'API Key' },
   jackett:     { label: 'Jackett',      category: 'Indexers',         placeholder: 'http://192.168.1.x:9117',  keyLabel: 'API Key' },
-  qbittorrent: { label: 'qBittorrent',  category: 'Download Clients', placeholder: 'http://192.168.1.x:8080',  keyLabel: 'Password' },
+  qbittorrent: { label: 'qBittorrent',  category: 'Download Clients', placeholder: 'http://192.168.1.x:8080',  keyLabel: 'user:password' },
   nzbget:      { label: 'NZBGet',       category: 'Download Clients', placeholder: 'http://192.168.1.x:6789',  keyLabel: 'user:password' },
   huntarr:     { label: 'Huntarr',      category: 'Utilities',        placeholder: 'http://192.168.1.x:9705',  keyLabel: 'API Key' },
   requestrr:   { label: 'Requestrr',    category: 'Utilities',        placeholder: 'http://192.168.1.x:4545',  keyLabel: 'API Key' },

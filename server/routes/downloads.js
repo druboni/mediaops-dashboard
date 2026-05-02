@@ -1,20 +1,33 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
+import { addLog } from '../logBuffer.js'
 
 // Cache qBit session to avoid hammering the login endpoint on every poll
 let qbitCache = { url: null, sid: null, expires: 0 }
 
-async function getQbitSid(url, password) {
+function parseQbitCreds(userpass) {
+  const sep = (userpass || '').indexOf(':')
+  return sep > -1
+    ? { username: userpass.slice(0, sep), password: userpass.slice(sep + 1) }
+    : { username: 'admin', password: userpass || '' }
+}
+
+async function getQbitSid(url, userpass) {
   if (qbitCache.url === url && qbitCache.sid && Date.now() < qbitCache.expires) {
     return qbitCache.sid
   }
+  const { username, password } = parseQbitCreds(userpass)
+  addLog('info', `[qbit:login] POST ${url}/api/v2/auth/login username=${username}`)
   const res = await fetch(`${url}/api/v2/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `username=admin&password=${encodeURIComponent(password)}`,
+    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
     signal: AbortSignal.timeout(5000),
   })
   const text = await res.text()
+  addLog(text.trim() === 'Ok.' ? 'info' : 'error',
+    `[qbit:login] HTTP ${res.status} response: "${text.trim()}"`,
+    { status: res.status, responseText: text.trim() })
   if (text.trim() !== 'Ok.') throw new Error('qBittorrent auth failed — check password')
   const sid = res.headers.get('set-cookie')?.match(/SID=([^;]+)/)?.[1]
   if (!sid) throw new Error('No session cookie returned from qBittorrent')
@@ -57,11 +70,12 @@ function mapNzbStatus(status) {
 function getNzbAuth(userpass) {
   const sep = (userpass || '').indexOf(':')
   const user = sep > -1 ? userpass.slice(0, sep) : 'nzbget'
-  const pass = sep > -1 ? userpass.slice(sep + 1) : (userpass || 'tegbzn6789')
+  const pass = sep > -1 ? userpass.slice(sep + 1) : (userpass || '')
   return Buffer.from(`${user}:${pass}`).toString('base64')
 }
 
-async function nzbRpc(url, auth, method, params = []) {
+async function nzbRpc(url, userpass, method, params = []) {
+  const auth = getNzbAuth(userpass)
   const res = await fetch(`${url}/jsonrpc`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
@@ -112,11 +126,10 @@ async function getQbitData(url, password) {
 }
 
 async function getNzbData(url, userpass) {
-  const auth = getNzbAuth(userpass)
   const [groups, history, status] = await Promise.all([
-    nzbRpc(url, auth, 'listgroups', [0]),
-    nzbRpc(url, auth, 'history', [false]),
-    nzbRpc(url, auth, 'status', []),
+    nzbRpc(url, userpass, 'listgroups', [0]),
+    nzbRpc(url, userpass, 'history', [false]),
+    nzbRpc(url, userpass, 'status', []),
   ])
 
   const queue = (groups || []).map((g) => {
@@ -247,8 +260,7 @@ export default async function downloadsRoutes(fastify) {
 
     try {
       const url = svc.url.replace(/\/$/, '')
-      const auth = getNzbAuth(svc.apiKey)
-      await nzbRpc(url, auth, 'editqueue', [nzbAction, '', [parseInt(id)]])
+      await nzbRpc(url, svc.apiKey, 'editqueue', [nzbAction, '', [parseInt(id)]])
       return { ok: true }
     } catch (err) {
       return reply.status(502).send({ ok: false, error: err.message })
@@ -283,8 +295,7 @@ export default async function downloadsRoutes(fastify) {
     const { limit } = request.body
     try {
       const url = svc.url.replace(/\/$/, '')
-      const auth = getNzbAuth(svc.apiKey)
-      await nzbRpc(url, auth, 'rate', [parseInt(limit) || 0])
+      await nzbRpc(url, svc.apiKey, 'rate', [parseInt(limit) || 0])
       return { ok: true }
     } catch (err) {
       return reply.status(502).send({ ok: false, error: err.message })
