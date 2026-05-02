@@ -3,10 +3,10 @@ services:
     build: .
     container_name: mediaops
     ports:
-      - "8080:8080"
+      - "8990:8080"
     volumes:
-      - ./config:/app/config
+      - /opt/mediaops/config:/app/config
     environment:
-      - JWT_SECRET=changeme
-      - ADMIN_PASSWORD=changeme
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - NODE_ENV=production
     restart: unless-stopped
