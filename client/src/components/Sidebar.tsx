@@ -20,6 +20,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Media',
     items: [
+      { label: 'Calendar',  path: '/calendar',   anyOf: ['sonarr', 'radarr'] },
       { label: 'Movies',    path: '/movies',    service: 'radarr' },
       { label: 'TV Shows',  path: '/tv',         service: 'sonarr' },
       { label: 'Music',     path: '/music',      service: 'lidarr' },
