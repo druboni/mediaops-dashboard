@@ -1,7 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useConfig } from '../store/config'
 import { useAuth } from '../store/auth'
-import { useTheme, THEMES } from '../store/theme'
 import type { ServiceName } from '../types'
 
 interface NavItem {
@@ -62,7 +61,6 @@ interface SidebarProps {
 export default function Sidebar({ open, onClose }: SidebarProps) {
   const { enabledServices } = useConfig()
   const { logout } = useAuth()
-  const { theme, setTheme } = useTheme()
   const location = useLocation()
 
   const isVisible = (item: NavItem) => {
@@ -115,24 +113,6 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       <div className="border-t border-gray-800 py-2">
         <NavLink path="/settings" label="Settings" active={isActive('/settings')} onNavigate={onClose} />
         <NavLink path="/logs"     label="Logs"     active={isActive('/logs')}     onNavigate={onClose} />
-
-        {/* Theme picker */}
-        <div className="flex items-center gap-2 px-4 py-3">
-          <span className="text-xs text-gray-500 uppercase tracking-wider flex-1">Theme</span>
-          {THEMES.map((t) => (
-            <button
-              key={t.id}
-              title={t.label}
-              onClick={() => setTheme(t.id)}
-              className="w-5 h-5 rounded-full border-2 transition-all"
-              style={{
-                backgroundColor: t.accent,
-                borderColor: theme === t.id ? '#fff' : 'transparent',
-                boxShadow: theme === t.id ? `0 0 6px ${t.accent}` : 'none',
-              }}
-            />
-          ))}
-        </div>
 
         <button
           onClick={logout}

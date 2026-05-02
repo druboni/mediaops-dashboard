@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useConfig } from '../store/config'
+import { useTheme, THEMES } from '../store/theme'
 import api from '../services/api'
 import type { Config, ServiceName, ServiceConfig } from '../types'
 
@@ -45,6 +46,7 @@ type TestStatus = 'idle' | 'testing' | 'ok' | 'error'
 
 export default function Settings() {
   const { config, updateConfig } = useConfig()
+  const { theme, setTheme } = useTheme()
   const [services, setServices] = useState<Config['services']>(EMPTY_SERVICES)
   const [testStatus, setTestStatus] = useState<Partial<Record<ServiceName, TestStatus>>>({})
   const [testError, setTestError] = useState<Partial<Record<ServiceName, string>>>({})
@@ -145,6 +147,35 @@ export default function Settings() {
           Welcome — enable and configure at least one service to get started.
         </div>
       )}
+
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+          Appearance
+        </h2>
+        <div className="flex gap-3">
+          {THEMES.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTheme(t.id)}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all text-sm font-medium ${
+                theme === t.id
+                  ? 'border-blue-600 bg-blue-900/30 text-white'
+                  : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-white hover:border-gray-600'
+              }`}
+            >
+              <span
+                className="w-4 h-4 rounded-full shrink-0"
+                style={{
+                  backgroundColor: t.accent,
+                  boxShadow: theme === t.id ? `0 0 8px ${t.accent}` : 'none',
+                }}
+              />
+              {t.label}
+              {theme === t.id && <span className="text-xs text-blue-400 ml-1">active</span>}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <div className="space-y-8">
         {CATEGORY_ORDER.map((category) => (
