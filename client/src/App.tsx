@@ -11,6 +11,8 @@ import Requests from './pages/Requests'
 import Indexers from './pages/Indexers'
 import Music from './pages/Music'
 import Subtitles from './pages/Subtitles'
+import Activity from './pages/Activity'
+import Hunt from './pages/Hunt'
 import Settings from './pages/Settings'
 import Layout from './components/Layout'
 
@@ -45,6 +47,8 @@ function AppRoutes() {
         <Route path="indexers" element={<Indexers />} />
         <Route path="music" element={<Music />} />
         <Route path="subtitles" element={<Subtitles />} />
+        <Route path="activity" element={<Activity />} />
+        <Route path="hunt" element={<Hunt />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

@@ -59,15 +59,23 @@ async function getSonarrData(url, key) {
 }
 
 async function getLidarrData(url, key) {
-  const [status, artists] = await Promise.all([
+  const [status, artists, history] = await Promise.all([
     safeFetch(`${url}/api/v1/system/status`, { headers: arrH(key) }),
     safeFetch(`${url}/api/v1/artist`, { headers: arrH(key) }),
+    safeFetch(`${url}/api/v1/history?pageSize=5&sortKey=date&sortDirection=descending&eventType=downloadImported`, { headers: arrH(key) }),
   ])
   const artistData = artists.ok && Array.isArray(artists.data) ? artists.data : []
   return {
     health: status.ok ? { ok: true, version: status.data.version } : { ok: false, error: status.error },
     artistCount: artists.ok ? artistData.length : null,
     albumCount: artists.ok ? artistData.reduce((s, a) => s + (a.statistics?.albumCount || 0), 0) : null,
+    recent: history.ok ? (history.data.records || []).map((r) => ({
+      title: r.artist?.artistName || r.sourceTitle,
+      subtitle: r.album?.title || null,
+      type: 'album',
+      service: 'lidarr',
+      date: r.date,
+    })) : [],
   }
 }
 
@@ -186,7 +194,7 @@ export default async function dashboardRoutes(fastify) {
         on('plex')        ? getPlexData(at('plex').url, at('plex').key)                   : null,
         on('qbittorrent') ? getQbitData(at('qbittorrent').url, at('qbittorrent').key)     : null,
         on('nzbget')      ? getNzbgetData(at('nzbget').url, at('nzbget').key)             : null,
-        on('huntarr')     ? getSimpleHealth(at('huntarr').url, '/api/v1/system/status', arrH(at('huntarr').key)) : null,
+        on('huntarr')     ? getSimpleHealth(at('huntarr').url, '/api/status', arrH(at('huntarr').key)) : null,
         on('requestrr')   ? getSimpleHealth(at('requestrr').url, '/')                     : null,
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
@@ -200,6 +208,7 @@ export default async function dashboardRoutes(fastify) {
     const recentlyAdded = [
       ...(radarr?.recent || []),
       ...(sonarr?.recent || []),
+      ...(lidarr?.recent || []),
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10)
 
     return {

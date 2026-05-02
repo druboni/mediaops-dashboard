@@ -35,6 +35,7 @@ function formatSpeed(bytesPerSec: number): string {
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
   if (mins < 60) return `${mins}m ago`
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
@@ -237,9 +238,11 @@ export default function Dashboard() {
               <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded font-medium ${
-                    item.type === 'movie' ? 'bg-blue-900/60 text-blue-300' : 'bg-purple-900/60 text-purple-300'
+                    item.type === 'movie'  ? 'bg-blue-900/60 text-blue-300' :
+                    item.type === 'album'  ? 'bg-purple-900/60 text-purple-300' :
+                                            'bg-green-900/60 text-green-300'
                   }`}>
-                    {item.type === 'movie' ? 'Movie' : 'TV'}
+                    {item.type === 'movie' ? 'Movie' : item.type === 'album' ? 'Music' : 'TV'}
                   </span>
                   <div className="min-w-0">
                     <p className="text-sm text-white truncate">
