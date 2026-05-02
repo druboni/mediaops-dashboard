@@ -94,7 +94,7 @@ function timeAgo(d: string) {
 // ── Detail Panel ───────────────────────────────────────────────────────────
 
 function MovieDetailPanel({
-  movie, profiles, onClose, onUpdate, onDelete, onSearch,
+  movie, profiles, onClose, onUpdate, onDelete, onSearch, isSearching, searchQueued,
 }: {
   movie: RadarrMovie
   profiles: QualityProfile[]
@@ -102,6 +102,8 @@ function MovieDetailPanel({
   onUpdate: (m: RadarrMovie) => void
   onDelete: (m: RadarrMovie, files: boolean) => void
   onSearch: (m: RadarrMovie) => void
+  isSearching: boolean
+  searchQueued: boolean
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const profileName = profiles.find((p) => p.id === movie.qualityProfileId)?.name ?? '—'
@@ -209,9 +211,12 @@ function MovieDetailPanel({
           <div className="flex gap-2">
             <button
               onClick={() => onSearch(movie)}
-              className="flex-1 text-xs py-1.5 rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
+              disabled={isSearching}
+              className={`flex-1 text-xs py-1.5 rounded text-white transition-colors ${
+                searchQueued ? 'bg-green-700' : 'bg-blue-700 hover:bg-blue-600'
+              } disabled:opacity-60`}
             >
-              Search
+              {isSearching ? 'Searching…' : searchQueued ? 'Queued!' : 'Search'}
             </button>
             <button
               onClick={() => onUpdate({ ...movie, monitored: !movie.monitored })}
@@ -591,6 +596,8 @@ export default function Movies() {
             onUpdate={(m) => updateMovie.mutate(m)}
             onDelete={(m, files) => deleteMovie.mutate({ movie: m, deleteFiles: files })}
             onSearch={(m) => triggerSearch.mutate(m)}
+            isSearching={triggerSearch.isPending}
+            searchQueued={triggerSearch.isSuccess}
           />
         </>
       )}

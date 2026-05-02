@@ -88,7 +88,7 @@ const EVENT_LABEL: Record<string, string> = {
 // ── Detail Panel ───────────────────────────────────────────────────────────
 
 function SeriesDetailPanel({
-  series, profiles, onClose, onUpdate, onDelete, onSearch, onSeasonToggle,
+  series, profiles, onClose, onUpdate, onDelete, onSearch, onSeasonToggle, isSearching, searchQueued,
 }: {
   series: SonarrSeries
   profiles: QualityProfile[]
@@ -97,6 +97,8 @@ function SeriesDetailPanel({
   onDelete: (s: SonarrSeries, files: boolean) => void
   onSearch: (s: SonarrSeries) => void
   onSeasonToggle: (s: SonarrSeries, seasonNumber: number) => void
+  isSearching: boolean
+  searchQueued: boolean
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const profileName = profiles.find((p) => p.id === series.qualityProfileId)?.name ?? '—'
@@ -225,7 +227,15 @@ function SeriesDetailPanel({
           </div>
         ) : (
           <div className="flex gap-2">
-            <button onClick={() => onSearch(series)} className="flex-1 text-xs py-1.5 rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors">Search</button>
+            <button
+              onClick={() => onSearch(series)}
+              disabled={isSearching}
+              className={`flex-1 text-xs py-1.5 rounded text-white transition-colors ${
+                searchQueued ? 'bg-green-700' : 'bg-blue-700 hover:bg-blue-600'
+              } disabled:opacity-60`}
+            >
+              {isSearching ? 'Searching…' : searchQueued ? 'Queued!' : 'Search'}
+            </button>
             <button
               onClick={() => onUpdate({ ...series, monitored: !series.monitored })}
               className={`flex-1 text-xs py-1.5 rounded border transition-colors ${
@@ -626,6 +636,8 @@ export default function TVShows() {
             onDelete={(s, files) => deleteSeries.mutate({ s, deleteFiles: files })}
             onSearch={(s) => triggerSearch.mutate(s)}
             onSeasonToggle={(s, seasonNumber) => toggleSeason.mutate({ s, seasonNumber })}
+            isSearching={triggerSearch.isPending}
+            searchQueued={triggerSearch.isSuccess}
           />
         </>
       )}

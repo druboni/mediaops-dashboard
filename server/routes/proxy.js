@@ -54,14 +54,29 @@ export default async function proxyRoutes(fastify) {
 
       try {
         const res = await fetch(targetUrl, options)
-        addLog(res.ok ? 'info' : 'warn', `[proxy:${service}] ${options.method} /${path} → ${res.status}`, {
-          service, status: res.status, url: targetUrl,
-        })
-        reply.status(res.status)
         const ct = res.headers.get('content-type') || ''
-        return reply.send(ct.includes('application/json') ? await res.json() : await res.text())
+        const responseData = ct.includes('application/json') ? await res.json() : await res.text()
+
+        const logData = { service, status: res.status, url: targetUrl }
+
+        if (['POST', 'PUT', 'PATCH'].includes(request.method) && request.body) {
+          const b = JSON.stringify(request.body)
+          logData.body = b.length > 250 ? b.slice(0, 250) + '…' : b
+        }
+
+        if (path.includes('command') && res.ok && responseData && typeof responseData === 'object') {
+          const r = Array.isArray(responseData) ? responseData[0] : responseData
+          if (r?.name) logData.responseText = `id:${r.id} name:${r.name} status:${r.status ?? 'queued'}`
+        } else if (!res.ok && responseData) {
+          const errStr = typeof responseData === 'string' ? responseData : JSON.stringify(responseData)
+          logData.responseText = errStr.slice(0, 200)
+        }
+
+        addLog(res.ok ? 'info' : 'warn', `[proxy:${service}] ${request.method} /${path} → ${res.status}`, logData)
+        reply.status(res.status)
+        return reply.send(responseData)
       } catch (err) {
-        addLog('error', `[proxy:${service}] ${options.method} /${path} → ${err.message}`, {
+        addLog('error', `[proxy:${service}] ${request.method} /${path} → ${err.message}`, {
           service, error: err.message, url: targetUrl,
         })
         return reply.status(502).send({ error: err.message })
