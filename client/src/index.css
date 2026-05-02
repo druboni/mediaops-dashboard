@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -25,8 +27,6 @@
    Text warm:  #C8B89A
    Text dim:   #605848
 */
-
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap');
 
 [data-theme="cyberpunk"] {
   font-family: 'Rajdhani', 'Arial Narrow', Arial, sans-serif;
