@@ -214,7 +214,7 @@ function IssueDetailPanel({
   })
 
   const display = fullIssue ?? issue
-  const title = mediaTitle(display.media)
+  const title = mediaTitle(issue.media) // issue from list has enriched title; fullIssue from proxy does not
 
   return (
     <div className="fixed right-0 top-0 h-screen w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
@@ -336,7 +336,7 @@ export default function Requests() {
   // Pending requests
   const { data: pendingData, isLoading: pendingLoading } = useQuery<RequestPage>({
     queryKey: ['overseerr-requests', 'pending'],
-    queryFn: async () => (await api.get('/proxy/overseerr/api/v1/request', {
+    queryFn: async () => (await api.get('/overseerr/requests', {
       params: { filter: 'pending', take: 100, skip: 0, sort: 'added' },
     })).data,
     enabled: enabled && tab === 'pending',
@@ -346,7 +346,7 @@ export default function Requests() {
   // All requests (paginated)
   const { data: allData, isLoading: allLoading } = useQuery<RequestPage>({
     queryKey: ['overseerr-requests', 'all', allFilter, allPage],
-    queryFn: async () => (await api.get('/proxy/overseerr/api/v1/request', {
+    queryFn: async () => (await api.get('/overseerr/requests', {
       params: { filter: allFilter, take: TAKE, skip: allPage * TAKE, sort: 'added' },
     })).data,
     enabled: enabled && tab === 'all',
@@ -356,7 +356,7 @@ export default function Requests() {
   // Issues
   const { data: issuesData, isLoading: issuesLoading } = useQuery<IssuePage>({
     queryKey: ['overseerr-issues', issueFilter],
-    queryFn: async () => (await api.get('/proxy/overseerr/api/v1/issue', {
+    queryFn: async () => (await api.get('/overseerr/issues', {
       params: { take: 50, skip: 0, filter: issueFilter, sort: 'added' },
     })).data,
     enabled: enabled && tab === 'issues',
