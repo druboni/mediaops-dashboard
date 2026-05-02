@@ -637,7 +637,7 @@ export default function TVShows() {
             onSearch={(s) => triggerSearch.mutate(s)}
             onSeasonToggle={(s, seasonNumber) => toggleSeason.mutate({ s, seasonNumber })}
             isSearching={triggerSearch.isPending}
-            searchQueued={triggerSearch.isSuccess}
+            searchQueued={triggerSearch.isSuccess && triggerSearch.variables?.id === selected.id}
           />
         </>
       )}

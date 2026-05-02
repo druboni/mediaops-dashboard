@@ -597,7 +597,7 @@ export default function Movies() {
             onDelete={(m, files) => deleteMovie.mutate({ movie: m, deleteFiles: files })}
             onSearch={(m) => triggerSearch.mutate(m)}
             isSearching={triggerSearch.isPending}
-            searchQueued={triggerSearch.isSuccess}
+            searchQueued={triggerSearch.isSuccess && triggerSearch.variables?.id === selected.id}
           />
         </>
       )}
