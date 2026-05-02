@@ -6,6 +6,10 @@ import api from '../services/api'
 import type { ServiceName } from '../types'
 
 interface HealthEntry { ok: boolean; version?: string; error?: string }
+interface HealthAlert { service: string; level: 'warning' | 'error'; source: string; message: string }
+interface IndexerStatus { indexerId: number; mostRecentFailure: string; initialFailure: string; disabledTill: string }
+interface HealthData { alerts: HealthAlert[]; indexerStatus: IndexerStatus[] }
+
 interface DashboardData {
   health: Partial<Record<ServiceName, HealthEntry>>
   stats: {
@@ -57,6 +61,13 @@ export default function Dashboard() {
   useEffect(() => {
     if (!configLoading && enabledServices.length === 0) navigate('/settings')
   }, [configLoading, enabledServices, navigate])
+
+  const { data: healthData } = useQuery<HealthData>({
+    queryKey: ['health'],
+    queryFn: async () => (await api.get<HealthData>('/health')).data,
+    refetchInterval: 60_000,
+    enabled: enabledServices.length > 0,
+  })
 
   const { data, isLoading, dataUpdatedAt } = useQuery<DashboardData>({
     queryKey: ['dashboard'],
@@ -110,6 +121,42 @@ export default function Dashboard() {
           </span>
         )}
       </div>
+
+      {/* Alerts Banner */}
+      {healthData && (healthData.alerts.length > 0 || healthData.indexerStatus.length > 0) && (
+        <section className="mb-6 space-y-1.5">
+          {healthData.indexerStatus.map((s) => (
+            <div key={s.indexerId} className="flex items-start gap-3 bg-orange-900/20 border border-orange-800/50 rounded-lg px-4 py-2.5 text-sm">
+              <span className="text-orange-400 shrink-0 mt-0.5">⚠</span>
+              <div className="min-w-0">
+                <span className="text-orange-300 font-medium">Prowlarr indexer disabled</span>
+                <span className="text-orange-400/80 ml-2 text-xs">
+                  Re-enables {new Date(s.disabledTill) <= new Date() ? 'soon' : `at ${new Date(s.disabledTill).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                </span>
+              </div>
+            </div>
+          ))}
+          {healthData.alerts.map((a, i) => (
+            <div key={i} className={`flex items-start gap-3 rounded-lg px-4 py-2.5 text-sm border ${
+              a.level === 'error'
+                ? 'bg-red-900/20 border-red-800/50'
+                : 'bg-yellow-900/20 border-yellow-800/50'
+            }`}>
+              <span className={`shrink-0 mt-0.5 ${a.level === 'error' ? 'text-red-400' : 'text-yellow-400'}`}>
+                {a.level === 'error' ? '✕' : '⚠'}
+              </span>
+              <div className="min-w-0">
+                <span className={`font-medium capitalize mr-2 ${a.level === 'error' ? 'text-red-300' : 'text-yellow-300'}`}>
+                  {a.service}
+                </span>
+                <span className={`text-xs ${a.level === 'error' ? 'text-red-400/80' : 'text-yellow-400/80'}`}>
+                  {a.message}
+                </span>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* Health Grid */}
       <section className="mb-8">

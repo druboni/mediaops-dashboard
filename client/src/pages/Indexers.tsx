@@ -23,6 +23,13 @@ interface ProwlarrIndexer {
   // full config fields included for PUT
   [key: string]: unknown
 }
+interface ProwlarrIndexerStatus {
+  indexerId: number
+  mostRecentFailure: string
+  initialFailure: string
+  disabledTill: string
+}
+
 interface ProwlarrStat {
   indexerId: number
   indexerName: string
@@ -105,8 +112,19 @@ function ProwlarrSection() {
     staleTime: 60_000,
   })
 
+  const { data: statusData } = useQuery<ProwlarrIndexerStatus[]>({
+    queryKey: ['prowlarr-indexerstatus'],
+    queryFn: async () => (await api.get('/proxy/prowlarr/api/v1/indexerstatus')).data,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+
   const statsMap = new Map<number, ProwlarrStat>(
     (statsData?.indexers ?? []).map((s) => [s.indexerId, s])
+  )
+
+  const disabledMap = new Map<number, ProwlarrIndexerStatus>(
+    (statusData ?? []).map((s) => [s.indexerId, s])
   )
 
   const toggleEnable = useMutation({
@@ -179,6 +197,17 @@ function ProwlarrSection() {
         )}
       </div>
 
+      {/* Disabled indexers banner */}
+      {statusData && statusData.length > 0 && (
+        <div className="mb-4 flex items-start gap-3 bg-orange-900/20 border border-orange-800/50 rounded-lg px-4 py-2.5 text-sm">
+          <span className="text-orange-400 shrink-0 mt-0.5">⚠</span>
+          <div>
+            <span className="text-orange-300 font-medium">{statusData.length} indexer{statusData.length > 1 ? 's' : ''} temporarily disabled by Prowlarr due to failures.</span>
+            <span className="text-orange-400/70 ml-2 text-xs">They will re-enable automatically — or use Test All to trigger re-check.</span>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="space-y-1.5">
           {[...Array(5)].map((_, i) => <div key={i} className="h-11 bg-gray-900 rounded-lg animate-pulse" />)}
@@ -200,11 +229,14 @@ function ProwlarrSection() {
             <tbody className="divide-y divide-gray-800/50">
               {indexers.map((idx) => {
                 const stats = statsMap.get(idx.id)
+                const disabled = disabledMap.get(idx.id)
                 const testState = testStates[idx.id] ?? 'idle'
+                const disabledTillDate = disabled ? new Date(disabled.disabledTill) : null
+                const stillDisabled = disabledTillDate && disabledTillDate > new Date()
                 return (
-                  <tr key={idx.id} className="hover:bg-gray-800/20 transition-colors group">
+                  <tr key={idx.id} className={`hover:bg-gray-800/20 transition-colors group ${stillDisabled ? 'bg-orange-950/10' : ''}`}>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <button
                           onClick={() => toggleEnable.mutate(idx)}
                           title={idx.enable ? 'Click to disable' : 'Click to enable'}
@@ -213,6 +245,11 @@ function ProwlarrSection() {
                           }`}
                         />
                         <span className={`text-sm truncate ${idx.enable ? 'text-white' : 'text-gray-500'}`}>{idx.name}</span>
+                        {stillDisabled && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-orange-900/60 text-orange-300 shrink-0">
+                            disabled until {disabledTillDate!.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
                         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
                           idx.protocol === 'torrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-green-900/60 text-green-300'
                         }`}>
