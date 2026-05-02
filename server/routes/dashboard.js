@@ -26,7 +26,7 @@ async function getRadarrData(url, key) {
   ])
   return {
     health: status.ok ? { ok: true, version: status.data.version } : { ok: false, error: status.error },
-    movieCount: movies.ok && Array.isArray(movies.data) ? movies.data.length : null,
+    movieCount: movies.ok && Array.isArray(movies.data) ? movies.data.filter((m) => m.hasFile).length : null,
     recent: history.ok ? (history.data.records || []).map((r) => ({
       title: r.movie?.title || r.sourceTitle,
       year: r.movie?.year,
