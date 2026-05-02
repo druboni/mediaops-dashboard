@@ -13,7 +13,7 @@ const AUTH_HEADER = {
 }
 
 // Services that use a query param for auth instead of a header
-const AUTH_QUERY: Record<string, string> = {
+const AUTH_QUERY = {
   jackett: 'apikey',
 }
 
