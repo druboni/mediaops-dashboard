@@ -401,6 +401,7 @@ function AddSeriesModal({ onClose, onAdded }: { onClose: () => void; onAdded: ()
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | 'continuing' | 'ended' | 'missing'
+type SortKey = 'title-asc' | 'title-desc' | 'size-desc' | 'episodes-desc' | 'progress-asc' | 'progress-desc'
 
 export default function TVShows() {
   const { enabledServices } = useConfig()
@@ -409,6 +410,7 @@ export default function TVShows() {
   const [showAdd, setShowAdd] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [sort, setSort] = useState<SortKey>('title-asc')
 
   const enabled = enabledServices.includes('sonarr')
 
@@ -486,7 +488,16 @@ export default function TVShows() {
       }
       return true
     })
-    .sort((a, b) => a.title.localeCompare(b.title))
+    .sort((a, b) => {
+      switch (sort) {
+        case 'title-desc': return b.title.localeCompare(a.title)
+        case 'size-desc':  return (b.statistics?.sizeOnDisk ?? 0) - (a.statistics?.sizeOnDisk ?? 0)
+        case 'episodes-desc': return (b.statistics?.episodeFileCount ?? 0) - (a.statistics?.episodeFileCount ?? 0)
+        case 'progress-asc': return seriesProgress(a).pct - seriesProgress(b).pct
+        case 'progress-desc': return seriesProgress(b).pct - seriesProgress(a).pct
+        default: return a.title.localeCompare(b.title)
+      }
+    })
 
   const counts = {
     all: series?.length ?? 0,
@@ -529,6 +540,14 @@ export default function TVShows() {
             </button>
           ))}
         </div>
+        <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="input text-xs py-1.5 pr-7">
+          <option value="title-asc">Title A→Z</option>
+          <option value="title-desc">Title Z→A</option>
+          <option value="size-desc">Size ↓</option>
+          <option value="episodes-desc">Episodes ↓</option>
+          <option value="progress-desc">Progress ↓</option>
+          <option value="progress-asc">Progress ↑</option>
+        </select>
       </div>
 
       {/* Table */}

@@ -393,6 +393,7 @@ function AddMovieModal({ onClose, onAdded }: { onClose: () => void; onAdded: () 
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | 'downloaded' | 'missing' | 'unmonitored'
+type SortKey = 'title-asc' | 'title-desc' | 'size-desc' | 'year-desc' | 'year-asc' | 'rating-desc'
 
 export default function Movies() {
   const { enabledServices } = useConfig()
@@ -401,6 +402,7 @@ export default function Movies() {
   const [showAdd, setShowAdd] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [sort, setSort] = useState<SortKey>('title-asc')
 
   const enabled = enabledServices.includes('radarr')
 
@@ -457,7 +459,16 @@ export default function Movies() {
       if (statusFilter === 'unmonitored' && m.monitored) return false
       return true
     })
-    .sort((a, b) => a.title.localeCompare(b.title))
+    .sort((a, b) => {
+      switch (sort) {
+        case 'title-desc': return b.title.localeCompare(a.title)
+        case 'size-desc':  return (b.sizeOnDisk ?? 0) - (a.sizeOnDisk ?? 0)
+        case 'year-desc':  return (b.year ?? 0) - (a.year ?? 0)
+        case 'year-asc':   return (a.year ?? 0) - (b.year ?? 0)
+        case 'rating-desc': return (b.ratings?.tmdb?.value ?? b.ratings?.imdb?.value ?? 0) - (a.ratings?.tmdb?.value ?? a.ratings?.imdb?.value ?? 0)
+        default: return a.title.localeCompare(b.title)
+      }
+    })
 
   const counts = {
     all: movies?.length ?? 0,
@@ -503,6 +514,14 @@ export default function Movies() {
             </button>
           ))}
         </div>
+        <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="input text-xs py-1.5 pr-7">
+          <option value="title-asc">Title A→Z</option>
+          <option value="title-desc">Title Z→A</option>
+          <option value="size-desc">Size ↓</option>
+          <option value="year-desc">Year ↓</option>
+          <option value="year-asc">Year ↑</option>
+          <option value="rating-desc">Rating ↓</option>
+        </select>
       </div>
 
       {/* Table */}

@@ -434,6 +434,7 @@ function AddArtistModal({ onClose, onAdded }: { onClose: () => void; onAdded: ()
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | 'monitored' | 'missing'
+type SortKey = 'name-asc' | 'name-desc' | 'albums-desc' | 'tracks-desc' | 'size-desc'
 
 export default function Music() {
   const { enabledServices } = useConfig()
@@ -442,6 +443,7 @@ export default function Music() {
   const [showAdd, setShowAdd] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [sort, setSort] = useState<SortKey>('name-asc')
 
   const enabled = enabledServices.includes('lidarr')
 
@@ -516,7 +518,15 @@ export default function Music() {
       }
       return true
     })
-    .sort((a, b) => a.sortName.localeCompare(b.sortName))
+    .sort((a, b) => {
+      switch (sort) {
+        case 'name-desc':   return b.sortName.localeCompare(a.sortName)
+        case 'albums-desc': return (b.statistics?.albumCount ?? 0) - (a.statistics?.albumCount ?? 0)
+        case 'tracks-desc': return (b.statistics?.trackFileCount ?? 0) - (a.statistics?.trackFileCount ?? 0)
+        case 'size-desc':   return (b.statistics?.sizeOnDisk ?? 0) - (a.statistics?.sizeOnDisk ?? 0)
+        default: return a.sortName.localeCompare(b.sortName)
+      }
+    })
 
   const counts = {
     all: artists?.length ?? 0,
@@ -558,6 +568,13 @@ export default function Music() {
             </button>
           ))}
         </div>
+        <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="input text-xs py-1.5 pr-7">
+          <option value="name-asc">Name A→Z</option>
+          <option value="name-desc">Name Z→A</option>
+          <option value="albums-desc">Albums ↓</option>
+          <option value="tracks-desc">Tracks ↓</option>
+          <option value="size-desc">Size ↓</option>
+        </select>
       </div>
 
       {/* Table */}
