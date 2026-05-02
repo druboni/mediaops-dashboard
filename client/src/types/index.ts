@@ -11,6 +11,7 @@ export type ServiceName =
   | 'nzbget'
   | 'huntarr'
   | 'requestrr'
+  | 'tautulli'
 
 export interface ServiceConfig {
   enabled: boolean

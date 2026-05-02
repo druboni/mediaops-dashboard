@@ -79,6 +79,38 @@ async function getLidarrData(url, key) {
   }
 }
 
+async function getTautulliData(url, key) {
+  const base = `${url}/api/v2?apikey=${encodeURIComponent(key)}`
+  const [libResult, histResult] = await Promise.all([
+    safeFetch(`${base}&cmd=get_libraries_table`),
+    safeFetch(`${base}&cmd=get_history&length=15&order_column=date&order_dir=desc`),
+  ])
+
+  const libOk = libResult.ok && libResult.data?.response?.result === 'success'
+  let movieCount = null, showCount = null, episodeCount = null, musicCount = null
+  if (libOk) {
+    for (const lib of libResult.data.response.data?.data ?? []) {
+      const n = parseInt(lib.count) || 0
+      if (lib.section_type === 'movie')  movieCount  = (movieCount  ?? 0) + n
+      if (lib.section_type === 'show')  { showCount   = (showCount   ?? 0) + n; episodeCount = (episodeCount ?? 0) + (parseInt(lib.child_count) || 0) }
+      if (lib.section_type === 'artist') musicCount  = (musicCount  ?? 0) + n
+    }
+  }
+
+  let recentlyPlayed = []
+  if (histResult.ok && histResult.data?.response?.result === 'success') {
+    recentlyPlayed = (histResult.data.response.data?.data ?? []).map((h) => ({
+      title:    h.media_type === 'episode' ? h.grandparent_title : h.title,
+      subtitle: h.media_type === 'episode' ? h.title : (h.year ? String(h.year) : null),
+      type:     h.media_type,
+      user:     h.friendly_name,
+      date:     new Date(h.date * 1000).toISOString(),
+    }))
+  }
+
+  return { health: { ok: libOk }, movieCount, showCount, episodeCount, musicCount, recentlyPlayed }
+}
+
 async function getSimpleHealth(url, path, headers = {}) {
   const r = await safeFetch(`${url}${path}`, { headers })
   return { health: r.ok ? { ok: true } : { ok: false, error: r.error } }
@@ -185,7 +217,7 @@ export default async function dashboardRoutes(fastify) {
     const on = (name) => svcs[name]?.enabled
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
-    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, huntarr, requestrr] =
+    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, huntarr, requestrr, tautulli] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -199,6 +231,7 @@ export default async function dashboardRoutes(fastify) {
         on('nzbget')      ? getNzbgetData(at('nzbget').url, at('nzbget').key)             : null,
         on('huntarr')     ? getSimpleHealth(at('huntarr').url, '/api/status', arrH(at('huntarr').key)) : null,
         on('requestrr')   ? getSimpleHealth(at('requestrr').url, '/')                     : null,
+        on('tautulli')    ? getTautulliData(at('tautulli').url, at('tautulli').key)       : null,
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
@@ -207,6 +240,7 @@ export default async function dashboardRoutes(fastify) {
     addHealth('bazarr', bazarr); addHealth('overseerr', overseerr); addHealth('prowlarr', prowlarr)
     addHealth('jackett', jackett); addHealth('plex', plex); addHealth('qbittorrent', qbit)
     addHealth('nzbget', nzbget); addHealth('huntarr', huntarr); addHealth('requestrr', requestrr)
+    addHealth('tautulli', tautulli)
 
     const recentlyAdded = [
       ...(radarr?.recent || []),
@@ -217,11 +251,11 @@ export default async function dashboardRoutes(fastify) {
     return {
       health,
       stats: {
-        movies:          radarr?.movieCount   ?? null,
-        shows:           sonarr?.seriesCount  ?? null,
-        episodes:        sonarr?.episodeCount ?? null,
-        artists:         lidarr?.artistCount  ?? null,
-        albums:          lidarr?.albumCount   ?? null,
+        movies:          tautulli?.movieCount   ?? radarr?.movieCount   ?? null,
+        shows:           tautulli?.showCount    ?? sonarr?.seriesCount  ?? null,
+        episodes:        tautulli?.episodeCount ?? sonarr?.episodeCount ?? null,
+        artists:         tautulli?.musicCount   ?? lidarr?.artistCount  ?? null,
+        albums:          lidarr?.albumCount ?? null,
         plexStreams:     plex?.activeStreams  ?? null,
         pendingRequests: overseerr?.pendingCount ?? null,
       },
@@ -231,6 +265,7 @@ export default async function dashboardRoutes(fastify) {
       },
       plexStreams: plex?.streamDetails || [],
       recentlyAdded,
+      recentlyPlayed: tautulli?.recentlyPlayed || [],
       pendingRequests: overseerr?.pendingRequests || [],
     }
   })

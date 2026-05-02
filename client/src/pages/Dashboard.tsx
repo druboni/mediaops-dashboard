@@ -27,6 +27,7 @@ interface DashboardData {
   }
   plexStreams: { title: string; user: string; player: string; state: string }[]
   recentlyAdded: { title: string; subtitle?: string; year?: number; type: string; service: string; date: string }[]
+  recentlyPlayed: { title: string; subtitle?: string; type: string; user: string; date: string }[]
   pendingRequests: { id: number; title: string; type: string; requestedBy: string }[]
 }
 
@@ -50,7 +51,7 @@ const SERVICE_LABELS: Partial<Record<ServiceName, string>> = {
   plex: 'Plex', sonarr: 'Sonarr', radarr: 'Radarr', lidarr: 'Lidarr',
   bazarr: 'Bazarr', overseerr: 'Overseerr', prowlarr: 'Prowlarr',
   jackett: 'Jackett', qbittorrent: 'qBittorrent', nzbget: 'NZBGet',
-  huntarr: 'Huntarr', requestrr: 'Requestrr',
+  huntarr: 'Huntarr', requestrr: 'Requestrr', tautulli: 'Tautulli',
 }
 
 export default function Dashboard() {
@@ -275,6 +276,36 @@ export default function Dashboard() {
           </section>
         )}
       </div>
+
+      {/* Recently Played */}
+      {data.recentlyPlayed.length > 0 && (
+        <section className="mb-8">
+          <h2 className="section-label">Recently Played</h2>
+          <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+            {data.recentlyPlayed.map((item, i) => (
+              <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded font-medium ${
+                    item.type === 'movie'   ? 'bg-blue-900/60 text-blue-300' :
+                    item.type === 'episode' ? 'bg-green-900/60 text-green-300' :
+                                             'bg-purple-900/60 text-purple-300'
+                  }`}>
+                    {item.type === 'movie' ? 'Movie' : item.type === 'episode' ? 'TV' : 'Music'}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm text-white truncate">{item.title}</p>
+                    {item.subtitle && <p className="text-xs text-gray-500 truncate">{item.subtitle}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs text-gray-600 hidden sm:block">{item.user}</span>
+                  <span className="text-xs text-gray-600">{timeAgo(item.date)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Recently Added */}
       {data.recentlyAdded.length > 0 && (

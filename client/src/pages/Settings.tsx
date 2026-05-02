@@ -23,6 +23,7 @@ const SERVICE_META: Record<ServiceName, ServiceMeta> = {
   nzbget:      { label: 'NZBGet',       category: 'Download Clients', placeholder: 'http://192.168.1.x:6789',  keyLabel: 'user:password' },
   huntarr:     { label: 'Huntarr',      category: 'Utilities',        placeholder: 'http://192.168.1.x:9705',  keyLabel: 'API Key' },
   requestrr:   { label: 'Requestrr',    category: 'Utilities',        placeholder: 'http://192.168.1.x:4545',  keyLabel: 'API Key' },
+  tautulli:    { label: 'Tautulli',     category: 'Media Server',     placeholder: 'http://192.168.1.x:8181',  keyLabel: 'API Key' },
 }
 
 const CATEGORY_ORDER = [

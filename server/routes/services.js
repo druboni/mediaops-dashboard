@@ -39,6 +39,7 @@ const TEST_ENDPOINT = {
   },
   huntarr:   (url, key) => ({ url: `${url}/api/v1/system/status`, headers: { 'X-Api-Key': key } }),
   requestrr: (url)      => ({ url: `${url}/`,                     headers: {} }),
+  tautulli:  (url, key) => ({ url: `${url}/api/v2?apikey=${encodeURIComponent(key)}&cmd=get_server_info`, headers: {} }),
 }
 
 export default async function servicesRoutes(fastify) {
