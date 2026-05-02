@@ -52,16 +52,31 @@ export default async function proxyRoutes(fastify) {
         options.body = JSON.stringify(request.body)
       }
 
+      const t0 = Date.now()
       try {
         const res = await fetch(targetUrl, options)
+        const ms = Date.now() - t0
         const ct = res.headers.get('content-type') || ''
         const responseData = ct.includes('application/json') ? await res.json() : await res.text()
 
-        const logData = { service, status: res.status, url: targetUrl }
+        // Build a clean display path (strip auth query params)
+        const displayQs = { ...(request.query || {}) }
+        if (authQueryParam) delete displayQs[authQueryParam]
+        const displayPath = `/${path}` + (Object.keys(displayQs).length ? '?' + new URLSearchParams(displayQs).toString() : '')
 
-        if (['POST', 'PUT', 'PATCH'].includes(request.method) && request.body) {
+        // Build response summary
+        let respSummary = ''
+        if (Array.isArray(responseData)) {
+          respSummary = ` [${responseData.length} items]`
+        } else if (path.includes('command') && res.ok && responseData?.name) {
+          respSummary = ` [${responseData.name}]`
+        }
+
+        const logData = { service, status: res.status, url: targetUrl, duration: ms }
+
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && request.body) {
           const b = JSON.stringify(request.body)
-          logData.body = b.length > 250 ? b.slice(0, 250) + '…' : b
+          logData.body = b.length > 300 ? b.slice(0, 300) + '…' : b
         }
 
         if (path.includes('command') && res.ok && responseData && typeof responseData === 'object') {
@@ -69,15 +84,21 @@ export default async function proxyRoutes(fastify) {
           if (r?.name) logData.responseText = `id:${r.id} name:${r.name} status:${r.status ?? 'queued'}`
         } else if (!res.ok && responseData) {
           const errStr = typeof responseData === 'string' ? responseData : JSON.stringify(responseData)
-          logData.responseText = errStr.slice(0, 200)
+          logData.responseText = errStr.slice(0, 300)
+        } else if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && res.ok && responseData && !Array.isArray(responseData)) {
+          const s = typeof responseData === 'string' ? responseData : JSON.stringify(responseData)
+          if (s.length < 300) logData.responseText = s
         }
 
-        addLog(res.ok ? 'info' : 'warn', `[proxy:${service}] ${request.method} /${path} → ${res.status}`, logData)
+        addLog(res.ok ? 'info' : 'warn',
+          `[proxy:${service}] ${request.method} ${displayPath} → ${res.status}${respSummary} (${ms}ms)`,
+          logData)
         reply.status(res.status)
         return reply.send(responseData)
       } catch (err) {
-        addLog('error', `[proxy:${service}] ${request.method} /${path} → ${err.message}`, {
-          service, error: err.message, url: targetUrl,
+        const ms = Date.now() - t0
+        addLog('error', `[proxy:${service}] ${request.method} /${path} → ${err.message} (${ms}ms)`, {
+          service, error: err.message, url: targetUrl, duration: ms,
         })
         return reply.status(502).send({ error: err.message })
       }

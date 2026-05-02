@@ -1,4 +1,4 @@
-const MAX = 300
+const MAX = 500
 const entries = []
 
 export function addLog(level, msg, data = {}) {

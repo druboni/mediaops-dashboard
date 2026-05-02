@@ -1,5 +1,6 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
+import { addLog } from '../logBuffer.js'
 
 async function safeFetch(url, options = {}, timeout = 5000) {
   try {
@@ -235,12 +236,29 @@ export default async function dashboardRoutes(fastify) {
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
-    const addHealth = (name, data) => { if (on(name)) health[name] = data?.health || { ok: false, error: 'Failed' } }
+    const addHealth = (name, data) => {
+      if (!on(name)) return
+      const h = data?.health || { ok: false, error: 'Failed' }
+      health[name] = h
+      if (!h.ok) addLog('warn', `[dashboard] ${name} unhealthy: ${h.error || 'no response'}`, { service: name })
+    }
     addHealth('radarr', radarr); addHealth('sonarr', sonarr); addHealth('lidarr', lidarr)
     addHealth('bazarr', bazarr); addHealth('overseerr', overseerr); addHealth('prowlarr', prowlarr)
     addHealth('jackett', jackett); addHealth('plex', plex); addHealth('qbittorrent', qbit)
     addHealth('nzbget', nzbget); addHealth('huntarr', huntarr); addHealth('requestrr', requestrr)
     addHealth('tautulli', tautulli)
+
+    addLog('debug', '[dashboard] poll complete', {
+      service: 'dashboard',
+      responseText: [
+        radarr   && `radarr:${radarr.movieCount ?? '?'}movies`,
+        sonarr   && `sonarr:${sonarr.seriesCount ?? '?'}shows`,
+        qbit     && `qbit:${qbit.activeCount ?? 0}active`,
+        nzbget   && `nzbget:${nzbget.activeCount ?? 0}active`,
+        plex     && `plex:${plex.activeStreams ?? 0}streams`,
+        overseerr && `overseerr:${overseerr.pendingCount ?? 0}pending`,
+      ].filter(Boolean).join(' | '),
+    })
 
     const recentlyAdded = [
       ...(radarr?.recent || []),
