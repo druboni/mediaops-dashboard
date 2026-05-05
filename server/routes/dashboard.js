@@ -173,15 +173,22 @@ async function getQbitData(url, userpass) {
     if (!sid) return { health: { ok: false, error: 'No session cookie returned' } }
 
     const cookie = `SID=${sid}`
-    const [info, active] = await Promise.all([
+    const [info, active, completed] = await Promise.all([
       fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/torrents/info?filter=active`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
+      fetch(`${url}/api/v2/torrents/info?filter=completed&sort=completion_on&reverse=true&limit=10`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
     ])
+    const recentlyDownloaded = Array.isArray(completed)
+      ? completed
+          .filter((t) => t.completion_on > 0)
+          .map((t) => ({ name: t.name, date: new Date(t.completion_on * 1000).toISOString(), size: t.size, client: 'qbittorrent' }))
+      : []
     return {
       health: { ok: true },
       dlSpeed: info.dl_info_speed || 0,
       upSpeed: info.up_info_speed || 0,
       activeCount: Array.isArray(active) ? active.length : 0,
+      recentlyDownloaded,
     }
   } catch (err) {
     return { health: { ok: false, error: err.message } }
@@ -193,19 +200,26 @@ async function getNzbgetData(url, userpass) {
   const user = sep > -1 ? userpass.slice(0, sep) : 'nzbget'
   const pass = sep > -1 ? userpass.slice(sep + 1) : (userpass || '')
   const auth = Buffer.from(`${user}:${pass}`).toString('base64')
+  const headers = { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` }
 
-  const r = await safeFetch(`${url}/jsonrpc`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
-    body: JSON.stringify({ version: '1.1', method: 'status', params: [] }),
-  })
-  if (!r.ok) return { health: { ok: false, error: r.error } }
+  const [statusRes, histRes] = await Promise.all([
+    safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'status', params: [] }) }),
+    safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'history', params: [false] }) }),
+  ])
+  if (!statusRes.ok) return { health: { ok: false, error: statusRes.error } }
 
-  const result = r.data.result || {}
+  const result = statusRes.data.result || {}
+  const recentlyDownloaded = histRes.ok && Array.isArray(histRes.data.result)
+    ? histRes.data.result
+        .filter((h) => h.Status === 'SUCCESS')
+        .slice(0, 10)
+        .map((h) => ({ name: h.NZBName, date: new Date(h.HistoryTime * 1000).toISOString(), size: h.FileSizeMB * 1024 * 1024, client: 'nzbget' }))
+    : []
   return {
     health: { ok: true },
     dlSpeed: result.DownloadRate || 0,
     activeCount: (result.RemainingSizeMB || 0) > 0 ? 1 : 0,
+    recentlyDownloaded,
   }
 }
 
@@ -266,6 +280,11 @@ export default async function dashboardRoutes(fastify) {
       ...(lidarr?.recent || []),
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10)
 
+    const recentlyDownloaded = [
+      ...(qbit?.recentlyDownloaded || []),
+      ...(nzbget?.recentlyDownloaded || []),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10)
+
     return {
       health,
       stats: {
@@ -283,6 +302,7 @@ export default async function dashboardRoutes(fastify) {
       },
       plexStreams: plex?.streamDetails || [],
       recentlyAdded,
+      recentlyDownloaded,
       recentlyPlayed: tautulli?.recentlyPlayed || [],
       pendingRequests: overseerr?.pendingRequests || [],
     }

@@ -27,8 +27,15 @@ interface DashboardData {
   }
   plexStreams: { title: string; user: string; player: string; state: string }[]
   recentlyAdded: { title: string; subtitle?: string; year?: number; type: string; service: string; date: string }[]
+  recentlyDownloaded: { name: string; date: string; size: number; client: string }[]
   recentlyPlayed: { title: string; subtitle?: string; type: string; user: string; date: string }[]
   pendingRequests: { id: number; title: string; type: string; requestedBy: string }[]
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`
+  return `${Math.round(bytes / 1024)} KB`
 }
 
 function formatSpeed(bytesPerSec: number): string {
@@ -300,6 +307,31 @@ export default function Dashboard() {
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-xs text-gray-600 hidden sm:block">{item.user}</span>
+                  <span className="text-xs text-gray-600">{timeAgo(item.date)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Recently Downloaded */}
+      {data.recentlyDownloaded.length > 0 && (
+        <section className="mb-8">
+          <h2 className="section-label">Recently Downloaded</h2>
+          <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+            {data.recentlyDownloaded.map((item, i) => (
+              <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded font-medium ${
+                    item.client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-orange-900/60 text-orange-300'
+                  }`}>
+                    {item.client === 'qbittorrent' ? 'qBit' : 'NZB'}
+                  </span>
+                  <p className="text-sm text-white truncate">{item.name}</p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs text-gray-600 hidden sm:block">{formatSize(item.size)}</span>
                   <span className="text-xs text-gray-600">{timeAgo(item.date)}</span>
                 </div>
               </div>
