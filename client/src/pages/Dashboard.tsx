@@ -25,11 +25,25 @@ interface DashboardData {
     qbittorrent: { ok: boolean; dlSpeed: number; upSpeed: number; active: number } | null
     nzbget: { ok: boolean; dlSpeed: number; active: number } | null
   }
-  plexStreams: { title: string; user: string; player: string; state: string }[]
+  plexStreams: {
+    title: string; user: string; player: string; platform: string | null; state: string
+    viewOffset: number; duration: number | null
+    videoCodec: string | null; videoResolution: string | null; audioCodec: string | null
+    playMethod: string
+  }[]
   recentlyAdded: { title: string; subtitle?: string; year?: number; type: string; service: string; date: string }[]
   recentlyDownloaded: { name: string; date: string; size: number; client: string }[]
   recentlyPlayed: { title: string; subtitle?: string; type: string; user: string; date: string }[]
   pendingRequests: { id: number; title: string; type: string; requestedBy: string }[]
+}
+
+function formatDuration(ms: number): string {
+  const totalSec = Math.floor(ms / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return `${m}:${String(s).padStart(2, '0')}`
 }
 
 function formatSize(bytes: number): string {
@@ -236,17 +250,39 @@ export default function Dashboard() {
           <section>
             <h2 className="section-label">Active Streams</h2>
             <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
-              {data.plexStreams.map((s, i) => (
-                <div key={i} className="px-4 py-3 flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-white truncate">{s.title}</p>
-                    <p className="text-xs text-gray-500">{s.user} · {s.player}</p>
+              {data.plexStreams.map((s, i) => {
+                const pct = s.duration && s.duration > 0 ? Math.round((s.viewOffset / s.duration) * 100) : null
+                const resolution = s.videoResolution === '4k' ? '4K' : s.videoResolution ? `${s.videoResolution}p` : null
+                const codecLabel = [resolution, s.videoCodec?.toUpperCase(), s.audioCodec?.toUpperCase()].filter(Boolean).join(' · ')
+                const playMethodColor = s.playMethod === 'direct play' ? 'text-green-400' : s.playMethod === 'transcode' ? 'text-yellow-400' : 'text-blue-400'
+                return (
+                  <div key={i} className="px-4 py-3 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm text-white truncate">{s.title}</p>
+                        <p className="text-xs text-gray-500">{s.user} · {s.player}{s.platform ? ` (${s.platform})` : ''}</p>
+                      </div>
+                      <span className={`text-xs shrink-0 mt-0.5 ${s.state === 'playing' ? 'text-green-400' : 'text-yellow-400'}`}>
+                        {s.state}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+                      <div className="flex items-center gap-3">
+                        {codecLabel && <span>{codecLabel}</span>}
+                        <span className={`capitalize ${playMethodColor}`}>{s.playMethod}</span>
+                      </div>
+                      {s.duration && (
+                        <span className="shrink-0 tabular-nums">{formatDuration(s.viewOffset)} / {formatDuration(s.duration)}</span>
+                      )}
+                    </div>
+                    {pct !== null && (
+                      <div className="w-full bg-gray-800 rounded-full h-0.5">
+                        <div className="bg-blue-500 h-0.5 rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                    )}
                   </div>
-                  <span className={`text-xs shrink-0 mt-0.5 ${s.state === 'playing' ? 'text-green-400' : 'text-yellow-400'}`}>
-                    {s.state}
-                  </span>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </section>
         )}

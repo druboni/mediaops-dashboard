@@ -146,12 +146,27 @@ async function getPlexData(url, token) {
   return {
     health: identity.ok ? { ok: true } : { ok: false, error: identity.error },
     activeStreams: sessions.ok ? (sessions.data.MediaContainer?.size ?? meta.length) : null,
-    streamDetails: meta.map((m) => ({
-      title: m.type === 'episode' ? `${m.grandparentTitle} · ${m.title}` : m.title,
-      user: m.User?.title || 'Unknown',
-      player: m.Player?.title || 'Unknown',
-      state: m.Player?.state || 'playing',
-    })),
+    streamDetails: meta.map((m) => {
+      const media = m.Media?.[0] || {}
+      const ts = m.TranscodeSession
+      const videoDecision = ts?.videoDecision || 'directplay'
+      const audioDecision = ts?.audioDecision || 'directplay'
+      const isTranscoding = videoDecision === 'transcode' || audioDecision === 'transcode'
+      const playMethod = isTranscoding ? 'transcode' : (ts ? 'direct stream' : 'direct play')
+      return {
+        title: m.type === 'episode' ? `${m.grandparentTitle} · ${m.title}` : m.title,
+        user: m.User?.title || 'Unknown',
+        player: m.Player?.title || 'Unknown',
+        platform: m.Player?.platform || null,
+        state: m.Player?.state || 'playing',
+        viewOffset: m.viewOffset || 0,
+        duration: m.duration || null,
+        videoCodec: media.videoCodec || null,
+        videoResolution: media.videoResolution || null,
+        audioCodec: media.audioCodec || null,
+        playMethod,
+      }
+    }),
   }
 }
 
