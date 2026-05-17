@@ -27,7 +27,8 @@ const TEST_ENDPOINT = {
         'Referer': `${url}/`,
       },
       body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-      checkText: 'Ok.',
+      checkText: 'Ok.',       // qBit 4.x success response
+      acceptStatus: [204],    // qBit 5.x success response (204 No Content)
     }
   },
   nzbget: (url, key) => {
@@ -73,10 +74,15 @@ export default async function servicesRoutes(fastify) {
         body: endpoint.body,
       })
       const response = await fetch(endpoint.url, fetchOpts)
+      // qBit 5.x returns 204 on successful login (was 200 + "Ok." in 4.x)
+      if (endpoint.acceptStatus && endpoint.acceptStatus.includes(response.status)) {
+        addLog('info', `[test:${service}] ${response.status} OK (accepted)`, { service, status: response.status })
+        return { ok: true, status: response.status }
+      }
       if (response.ok || response.status === 401) {
         if (response.status === 401) {
           addLog('error', `[test:${service}] 401 Unauthorized`, { service, status: 401 })
-          return reply.status(502).send({ ok: false, error: 'Reachable but API key is invalid (401)' })
+          return reply.status(502).send({ ok: false, error: 'Auth failed — check credentials' })
         }
         if (endpoint.checkText) {
           const text = await response.text()

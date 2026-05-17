@@ -25,8 +25,16 @@ export async function getQbitSid(url, userpass) {
     body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
     signal: AbortSignal.timeout(5000),
   })
-  const text = await res.text()
-  if (text.trim() !== 'Ok.') throw new Error('qBittorrent auth failed — check password')
+  // qBit 4.x: 200 + "Ok." body = success, "Fails." = wrong creds
+  // qBit 5.x: 204 No Content = success, 401 = wrong creds / banned
+  if (res.status === 204) {
+    // success — fall through to SID extraction
+  } else if (res.status === 200) {
+    const text = await res.text()
+    if (text.trim() !== 'Ok.') throw new Error('qBittorrent auth failed — check credentials')
+  } else {
+    throw new Error(`qBittorrent auth failed — check credentials (HTTP ${res.status})`)
+  }
   const sid = res.headers.get('set-cookie')?.match(/SID=([^;]+)/)?.[1]
   if (!sid) throw new Error('No session cookie returned from qBittorrent')
   cache = { url, sid, expires: Date.now() + 55 * 60 * 1000 }
