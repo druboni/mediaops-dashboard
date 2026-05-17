@@ -9,6 +9,7 @@ interface ServiceMeta {
   category: string
   placeholder: string
   keyLabel: string
+  splitCreds?: boolean
 }
 
 const SERVICE_META: Record<ServiceName, ServiceMeta> = {
@@ -20,8 +21,8 @@ const SERVICE_META: Record<ServiceName, ServiceMeta> = {
   overseerr:   { label: 'Overseerr',    category: 'Requests',         placeholder: 'http://192.168.1.x:5055',  keyLabel: 'API Key' },
   prowlarr:    { label: 'Prowlarr',     category: 'Indexers',         placeholder: 'http://192.168.1.x:9696',  keyLabel: 'API Key' },
   jackett:     { label: 'Jackett',      category: 'Indexers',         placeholder: 'http://192.168.1.x:9117',  keyLabel: 'API Key' },
-  qbittorrent: { label: 'qBittorrent',  category: 'Download Clients', placeholder: 'http://192.168.1.x:8080',  keyLabel: 'user:password' },
-  nzbget:      { label: 'NZBGet',       category: 'Download Clients', placeholder: 'http://192.168.1.x:6789',  keyLabel: 'user:password' },
+  qbittorrent: { label: 'qBittorrent',  category: 'Download Clients', placeholder: 'http://192.168.1.x:8080',  keyLabel: 'Username', splitCreds: true },
+  nzbget:      { label: 'NZBGet',       category: 'Download Clients', placeholder: 'http://192.168.1.x:6789',  keyLabel: 'Username', splitCreds: true },
   huntarr:     { label: 'Huntarr',      category: 'Utilities',        placeholder: 'http://192.168.1.x:9705',  keyLabel: 'API Key' },
   requestrr:   { label: 'Requestrr',    category: 'Utilities',        placeholder: 'http://192.168.1.x:4545',  keyLabel: 'API Key' },
   tautulli:    { label: 'Tautulli',     category: 'Media Server',     placeholder: 'http://192.168.1.x:8181',  keyLabel: 'API Key' },
@@ -266,6 +267,17 @@ function ServiceCard({
   meta, config, status, error, keyVisible,
   onToggle, onUrl, onApiKey, onTest, onToggleKey,
 }: ServiceCardProps) {
+  // For split-creds services (qBit, NZBGet), parse stored "user:password" into two fields
+  const parsedUsername = meta.splitCreds ? (config.apiKey || '').split(':')[0] : ''
+  const parsedPassword = meta.splitCreds ? (config.apiKey || '').split(':').slice(1).join(':') : ''
+
+  const handleUsername = (u: string) => {
+    onApiKey(u + ':' + parsedPassword)
+  }
+  const handlePassword = (p: string) => {
+    onApiKey(parsedUsername + ':' + p)
+  }
+
   return (
     <div
       className={`bg-gray-900 border rounded-lg p-4 transition-all ${
@@ -286,31 +298,72 @@ function ServiceCard({
             onChange={(e) => onUrl(e.target.value)}
             className="input w-full"
           />
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                type={keyVisible ? 'text' : 'password'}
-                placeholder={meta.keyLabel}
-                value={config.apiKey}
-                onChange={(e) => onApiKey(e.target.value)}
-                className="input w-full pr-12"
-              />
+
+          {meta.splitCreds ? (
+            <>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Username"
+                  value={parsedUsername}
+                  onChange={(e) => handleUsername(e.target.value)}
+                  className="input flex-1"
+                  autoComplete="off"
+                />
+                <div className="relative flex-1">
+                  <input
+                    type={keyVisible ? 'text' : 'password'}
+                    placeholder="Password"
+                    value={parsedPassword}
+                    onChange={(e) => handlePassword(e.target.value)}
+                    className="input w-full pr-12"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={onToggleKey}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-300"
+                  >
+                    {keyVisible ? 'hide' : 'show'}
+                  </button>
+                </div>
+                <button
+                  onClick={onTest}
+                  disabled={status === 'testing' || !config.url}
+                  className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                >
+                  {status === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={keyVisible ? 'text' : 'password'}
+                  placeholder={meta.keyLabel}
+                  value={config.apiKey}
+                  onChange={(e) => onApiKey(e.target.value)}
+                  className="input w-full pr-12"
+                />
+                <button
+                  type="button"
+                  onClick={onToggleKey}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-300"
+                >
+                  {keyVisible ? 'hide' : 'show'}
+                </button>
+              </div>
               <button
-                type="button"
-                onClick={onToggleKey}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-300"
+                onClick={onTest}
+                disabled={status === 'testing' || !config.url}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
               >
-                {keyVisible ? 'hide' : 'show'}
+                {status === 'testing' ? 'Testing…' : 'Test'}
               </button>
             </div>
-            <button
-              onClick={onTest}
-              disabled={status === 'testing' || !config.url}
-              className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
-            >
-              {status === 'testing' ? 'Testing…' : 'Test'}
-            </button>
-          </div>
+          )}
+
           {status === 'ok' && (
             <p className="text-green-400 text-xs">Connected successfully</p>
           )}
