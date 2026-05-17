@@ -1,39 +1,7 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
-
-// Cache qBit session to avoid hammering the login endpoint on every poll
-let qbitCache = { url: null, sid: null, expires: 0 }
-
-function parseQbitCreds(userpass) {
-  const sep = (userpass || '').indexOf(':')
-  return sep > -1
-    ? { username: userpass.slice(0, sep), password: userpass.slice(sep + 1) }
-    : { username: 'admin', password: userpass || '' }
-}
-
-async function getQbitSid(url, userpass) {
-  if (qbitCache.url === url && qbitCache.sid && Date.now() < qbitCache.expires) {
-    return qbitCache.sid
-  }
-  const { username, password } = parseQbitCreds(userpass)
-  addLog('info', `[qbit:login] POST ${url}/api/v2/auth/login username=${username}`)
-  const res = await fetch(`${url}/api/v2/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-    signal: AbortSignal.timeout(5000),
-  })
-  const text = await res.text()
-  addLog(text.trim() === 'Ok.' ? 'info' : 'error',
-    `[qbit:login] HTTP ${res.status} response: "${text.trim()}"`,
-    { status: res.status, responseText: text.trim() })
-  if (text.trim() !== 'Ok.') throw new Error('qBittorrent auth failed — check password')
-  const sid = res.headers.get('set-cookie')?.match(/SID=([^;]+)/)?.[1]
-  if (!sid) throw new Error('No session cookie returned from qBittorrent')
-  qbitCache = { url, sid, expires: Date.now() + 55 * 60 * 1000 }
-  return sid
-}
+import { getQbitSid } from '../qbitSession.js'
 
 function mapQbitState(state) {
   switch (state) {

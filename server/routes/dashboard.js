@@ -1,6 +1,7 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
+import { getQbitSid } from '../qbitSession.js'
 
 async function safeFetch(url, options = {}, timeout = 5000) {
   try {
@@ -172,21 +173,7 @@ async function getPlexData(url, token) {
 
 async function getQbitData(url, userpass) {
   try {
-    const sep = (userpass || '').indexOf(':')
-    const username = sep > -1 ? userpass.slice(0, sep) : 'admin'
-    const password = sep > -1 ? userpass.slice(sep + 1) : (userpass || '')
-    const loginRes = await fetch(`${url}/api/v2/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-      signal: AbortSignal.timeout(5000),
-    })
-    const loginText = await loginRes.text()
-    if (loginText.trim() !== 'Ok.') return { health: { ok: false, error: 'Auth failed — check password' } }
-
-    const sid = loginRes.headers.get('set-cookie')?.match(/SID=([^;]+)/)?.[1]
-    if (!sid) return { health: { ok: false, error: 'No session cookie returned' } }
-
+    const sid = await getQbitSid(url, userpass)
     const cookie = `SID=${sid}`
     const [info, active, completed] = await Promise.all([
       fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
