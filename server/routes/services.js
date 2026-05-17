@@ -13,6 +13,7 @@ const TEST_ENDPOINT = {
   // torznab caps endpoint accepts apikey without requiring a session cookie
   jackett:   (url, key) => ({ url: `${url}/api/v2.0/indexers/all/results/torznab?apikey=${key}&t=caps`, headers: {} }),
   // qBittorrent requires a login POST — plain GET to any endpoint returns 403
+  // Origin + Referer headers required to pass qBit's CSRF protection
   qbittorrent: (url, key) => {
     const sep = (key || '').indexOf(':')
     const username = sep > -1 ? key.slice(0, sep) : 'admin'
@@ -20,7 +21,11 @@ const TEST_ENDPOINT = {
     return {
       url: `${url}/api/v2/auth/login`,
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': url,
+        'Referer': `${url}/`,
+      },
       body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
       checkText: 'Ok.',
     }
