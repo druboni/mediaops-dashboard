@@ -59,8 +59,7 @@ async function nzbRpc(url, userpass, method, params = []) {
 const mbToBytes = (mb) => Math.round((mb || 0) * 1024 * 1024)
 
 async function getQbitData(url, password) {
-  const sid = await getQbitSid(url, password)
-  const cookie = `SID=${sid}`
+  const cookie = await getQbitSid(url, password)
   const headers = { Cookie: cookie }
 
   const [torrents, speedLimitModeText] = await Promise.all([
@@ -190,8 +189,7 @@ export default async function downloadsRoutes(fastify) {
 
     const url = svc.url.replace(/\/$/, '')
     try {
-      const sid = await getQbitSid(url, svc.apiKey)
-      const cookie = `SID=${sid}`
+      const cookie = await getQbitSid(url, svc.apiKey)
 
       const endpoints = {
         pause:  { path: '/api/v2/torrents/pause',  body: `hashes=${hash}` },
@@ -242,10 +240,10 @@ export default async function downloadsRoutes(fastify) {
 
     try {
       const url = svc.url.replace(/\/$/, '')
-      const sid = await getQbitSid(url, svc.apiKey)
+      const cookie = await getQbitSid(url, svc.apiKey)
       const res = await fetch(`${url}/api/v2/transfer/toggleSpeedLimitsMode`, {
         method: 'POST',
-        headers: { Cookie: `SID=${sid}` },
+        headers: { Cookie: cookie },
         signal: AbortSignal.timeout(5000),
       })
       if (!res.ok) return reply.status(502).send({ ok: false, error: `HTTP ${res.status}` })

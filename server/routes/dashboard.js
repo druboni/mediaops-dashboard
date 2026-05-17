@@ -173,8 +173,7 @@ async function getPlexData(url, token) {
 
 async function getQbitData(url, userpass) {
   try {
-    const sid = await getQbitSid(url, userpass)
-    const cookie = `SID=${sid}`
+    const cookie = await getQbitSid(url, userpass)
     const [info, active, completed] = await Promise.all([
       fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/torrents/info?filter=active`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
