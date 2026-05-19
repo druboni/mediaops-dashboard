@@ -207,12 +207,10 @@ export default function Dashboard() {
       {/* Stats Row */}
       <section className="mb-8">
         <h2 className="section-label">Library</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
           <StatCard label="Movies"   value={data.stats.movies}   />
           <StatCard label="Shows"    value={data.stats.shows}    />
           <StatCard label="Episodes" value={data.stats.episodes} />
-          <StatCard label="Artists"  value={data.stats.artists}  />
-          <StatCard label="Albums"   value={data.stats.albums}   />
           <StatCard label="Streams"  value={data.stats.plexStreams} highlight={!!data.stats.plexStreams} />
           <StatCard label="Requests" value={data.stats.pendingRequests} highlight={!!data.stats.pendingRequests} />
         </div>
