@@ -53,9 +53,19 @@ interface ServerStats {
   gpu: GpuInfo | null
 }
 
+interface ContainerInfo {
+  id: string
+  name: string
+  image: string
+  state: string
+  status: string
+  ports: number[]
+}
+
 interface SystemData {
   plexgpu: ServerStats
   arr: ServerStats
+  containers: ContainerInfo[] | null
 }
 
 function formatBytes(bytes: number): string {
@@ -253,22 +263,68 @@ export default function System() {
       )}
 
       {data && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
-            <h2 className="section-label">{data.plexgpu.label}</h2>
-            {data.plexgpu.host && (
-              <p className="text-xs text-gray-600 mb-3 font-mono">{data.plexgpu.host}</p>
-            )}
-            <ServerCard server={data.plexgpu} />
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div>
+              <h2 className="section-label">{data.plexgpu.label}</h2>
+              {data.plexgpu.host && (
+                <p className="text-xs text-gray-600 mb-3 font-mono">{data.plexgpu.host}</p>
+              )}
+              <ServerCard server={data.plexgpu} />
+            </div>
+            <div>
+              <h2 className="section-label">{data.arr.label}</h2>
+              {data.arr.host && (
+                <p className="text-xs text-gray-600 mb-3 font-mono">{data.arr.host}</p>
+              )}
+              <ServerCard server={data.arr} />
+            </div>
           </div>
-          <div>
-            <h2 className="section-label">{data.arr.label}</h2>
-            {data.arr.host && (
-              <p className="text-xs text-gray-600 mb-3 font-mono">{data.arr.host}</p>
-            )}
-            <ServerCard server={data.arr} />
-          </div>
-        </div>
+
+          {/* Docker Containers */}
+          {data.containers && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="section-label mb-0">Docker Containers</h2>
+                <span className="text-xs text-gray-600">
+                  {data.containers.filter(c => c.state === 'running').length} running
+                  {data.containers.filter(c => c.state !== 'running').length > 0 &&
+                    ` · ${data.containers.filter(c => c.state !== 'running').length} stopped`}
+                </span>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+                {data.containers.map((c) => {
+                  const stateColor =
+                    c.state === 'running'    ? 'bg-green-400' :
+                    c.state === 'paused'     ? 'bg-yellow-400' :
+                    c.state === 'restarting' ? 'bg-blue-400 animate-pulse' :
+                                               'bg-red-500'
+                  return (
+                    <div key={c.id} className="px-4 py-2.5 flex items-center gap-3">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stateColor}`} />
+                      <div className="flex-1 min-w-0 flex items-center gap-3">
+                        <span className="text-sm text-white font-medium truncate">{c.name}</span>
+                        <span className="text-xs text-gray-600 truncate hidden sm:block">{c.image}</span>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        {c.ports.length > 0 && (
+                          <span className="text-xs text-gray-600 font-mono hidden md:block">
+                            :{c.ports.join(' :')}
+                          </span>
+                        )}
+                        <span className={`text-xs tabular-nums ${
+                          c.state === 'running' ? 'text-gray-500' : 'text-red-400'
+                        }`}>
+                          {c.status}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+        </>
       )}
     </div>
   )

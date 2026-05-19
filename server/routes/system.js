@@ -1,3 +1,4 @@
+import http from 'http'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 
@@ -57,6 +58,52 @@ async function getGlances(host, port = 61208) {
   }
 }
 
+function dockerApiGet(path) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(
+      { socketPath: '/var/run/docker.sock', path, headers: { Host: 'localhost' } },
+      (res) => {
+        let raw = ''
+        res.on('data', (chunk) => { raw += chunk })
+        res.on('end', () => {
+          try { resolve(JSON.parse(raw)) }
+          catch { reject(new Error('Docker API: invalid JSON')) }
+        })
+      }
+    )
+    req.setTimeout(5000, () => { req.destroy(new Error('Docker API timeout')) })
+    req.on('error', reject)
+  })
+}
+
+async function getDockerContainers() {
+  try {
+    const raw = await dockerApiGet('/containers/json?all=1')
+    if (!Array.isArray(raw)) return null
+    return raw
+      .map((c) => ({
+        id:     c.Id?.slice(0, 12) ?? '',
+        name:   (c.Names?.[0] ?? '').replace(/^\//, ''),
+        image:  (c.Image ?? '').replace(/^sha256:/, '').split(':')[0].split('/').pop(),
+        state:  c.State  ?? 'unknown',   // 'running' | 'exited' | 'paused' | 'restarting' | ...
+        status: c.Status ?? '',           // human string, e.g. "Up 3 hours"
+        ports:  (c.Ports ?? [])
+          .filter((p) => p.PublicPort)
+          .map((p) => p.PublicPort)
+          .filter((v, i, a) => a.indexOf(v) === i)  // deduplicate
+          .sort((a, b) => a - b)
+          .slice(0, 4),
+      }))
+      .sort((a, b) => {
+        // running first, then alphabetical
+        if (a.state === b.state) return a.name.localeCompare(b.name)
+        return a.state === 'running' ? -1 : b.state === 'running' ? 1 : 0
+      })
+  } catch {
+    return null  // socket not mounted / not available
+  }
+}
+
 async function getGpu(host) {
   try {
     const res = await fetch(`http://${host}:61209`, { signal: AbortSignal.timeout(3000) })
@@ -79,10 +126,11 @@ export default async function systemRoutes(fastify) {
     const plexHost = plexUrl ? new URL(plexUrl).hostname : null
     const arrHost  = arrUrl  ? new URL(arrUrl).hostname  : null
 
-    const [plexGlances, arrGlances, gpu] = await Promise.allSettled([
+    const [plexGlances, arrGlances, gpu, containers] = await Promise.allSettled([
       plexHost ? getGlances(plexHost) : null,
       arrHost  ? getGlances(arrHost)  : null,
       plexHost ? getGpu(plexHost)     : null,
+      getDockerContainers(),
     ])
 
     return {
@@ -98,6 +146,7 @@ export default async function systemRoutes(fastify) {
         ...(arrGlances.status === 'fulfilled' ? arrGlances.value : { cpu: null, mem: null, disks: [], network: [] }),
         gpu: null,
       },
+      containers: containers.status === 'fulfilled' ? containers.value : null,
     }
   })
 }
