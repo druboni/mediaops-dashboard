@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
@@ -80,6 +80,8 @@ export default function Dashboard() {
   const { enabledServices, isLoading: configLoading } = useConfig()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set())
+  const dismissAlert = (key: string) => setDismissedAlerts(p => new Set([...p, key]))
 
   useEffect(() => {
     if (!configLoading && enabledServices.length === 0) navigate('/settings')
@@ -146,40 +148,45 @@ export default function Dashboard() {
       </div>
 
       {/* Alerts Banner */}
-      {healthData && (healthData.alerts.length > 0 || healthData.indexerStatus.length > 0) && (
-        <section className="mb-6 space-y-1.5">
-          {healthData.indexerStatus.map((s) => (
-            <div key={s.indexerId} className="flex items-start gap-3 bg-orange-900/20 border border-orange-800/50 rounded-lg px-4 py-2.5 text-sm">
-              <span className="text-orange-400 shrink-0 mt-0.5">⚠</span>
-              <div className="min-w-0">
-                <span className="text-orange-300 font-medium">Prowlarr indexer disabled</span>
-                <span className="text-orange-400/80 ml-2 text-xs">
-                  Re-enables {new Date(s.disabledTill) <= new Date() ? 'soon' : `at ${new Date(s.disabledTill).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-                </span>
+      {healthData && (healthData.alerts.length > 0 || healthData.indexerStatus.length > 0) && (() => {
+        const indexerAlerts = healthData.indexerStatus.filter(s => !dismissedAlerts.has(`indexer-${s.indexerId}`))
+        const healthAlerts  = healthData.alerts.filter((a, i) => !dismissedAlerts.has(`alert-${i}-${a.source}`))
+        if (indexerAlerts.length === 0 && healthAlerts.length === 0) return null
+        return (
+          <section className="mb-6 space-y-1.5">
+            {indexerAlerts.map((s) => (
+              <div key={s.indexerId} className="flex items-center gap-3 bg-orange-900/20 border border-orange-800/50 rounded-lg px-4 py-2.5 text-sm">
+                <span className="text-orange-400 shrink-0">⚠</span>
+                <div className="min-w-0 flex-1">
+                  <span className="text-orange-300 font-medium">Prowlarr indexer disabled</span>
+                  <span className="text-orange-400/80 ml-2 text-xs">
+                    Re-enables {new Date(s.disabledTill) <= new Date() ? 'soon' : `at ${new Date(s.disabledTill).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                  </span>
+                </div>
+                <button onClick={() => dismissAlert(`indexer-${s.indexerId}`)} className="text-orange-600 hover:text-orange-400 shrink-0 text-base leading-none transition-colors" title="Dismiss">✕</button>
               </div>
-            </div>
-          ))}
-          {healthData.alerts.map((a, i) => (
-            <div key={i} className={`flex items-start gap-3 rounded-lg px-4 py-2.5 text-sm border ${
-              a.level === 'error'
-                ? 'bg-red-900/20 border-red-800/50'
-                : 'bg-yellow-900/20 border-yellow-800/50'
-            }`}>
-              <span className={`shrink-0 mt-0.5 ${a.level === 'error' ? 'text-red-400' : 'text-yellow-400'}`}>
-                {a.level === 'error' ? '✕' : '⚠'}
-              </span>
-              <div className="min-w-0">
-                <span className={`font-medium capitalize mr-2 ${a.level === 'error' ? 'text-red-300' : 'text-yellow-300'}`}>
-                  {a.service}
+            ))}
+            {healthAlerts.map((a, i) => (
+              <div key={i} className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm border ${
+                a.level === 'error' ? 'bg-red-900/20 border-red-800/50' : 'bg-yellow-900/20 border-yellow-800/50'
+              }`}>
+                <span className={`shrink-0 ${a.level === 'error' ? 'text-red-400' : 'text-yellow-400'}`}>
+                  {a.level === 'error' ? '⚠' : '⚠'}
                 </span>
-                <span className={`text-xs ${a.level === 'error' ? 'text-red-400/80' : 'text-yellow-400/80'}`}>
-                  {a.message}
-                </span>
+                <div className="min-w-0 flex-1">
+                  <span className={`font-medium capitalize mr-2 ${a.level === 'error' ? 'text-red-300' : 'text-yellow-300'}`}>
+                    {a.service}
+                  </span>
+                  <span className={`text-xs ${a.level === 'error' ? 'text-red-400/80' : 'text-yellow-400/80'}`}>
+                    {a.message}
+                  </span>
+                </div>
+                <button onClick={() => dismissAlert(`alert-${i}-${a.source}`)} className={`shrink-0 text-base leading-none transition-colors ${a.level === 'error' ? 'text-red-700 hover:text-red-400' : 'text-yellow-700 hover:text-yellow-400'}`} title="Dismiss">✕</button>
               </div>
-            </div>
-          ))}
-        </section>
-      )}
+            ))}
+          </section>
+        )
+      })()}
 
       {/* Health Grid */}
       <section className="mb-8">
