@@ -17,6 +17,8 @@ import Activity from './pages/Activity'
 import Hunt from './pages/Hunt'
 import Settings from './pages/Settings'
 import Logs from './pages/Logs'
+import Search from './pages/Search'
+import System from './pages/System'
 import Layout from './components/Layout'
 
 const queryClient = new QueryClient()
@@ -53,6 +55,8 @@ function AppRoutes() {
         <Route path="calendar" element={<Calendar />} />
         <Route path="activity" element={<Activity />} />
         <Route path="hunt" element={<Hunt />} />
+        <Route path="search" element={<Search />} />
+        <Route path="system" element={<System />} />
         <Route path="settings" element={<Settings />} />
         <Route path="logs" element={<Logs />} />
       </Route>

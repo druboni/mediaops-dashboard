@@ -14,6 +14,8 @@ import proxyRoutes from './routes/proxy.js'
 import logsRoutes from './routes/logs.js'
 import overseerrRoutes from './routes/overseerr.js'
 import healthRoutes from './routes/health.js'
+import systemRoutes from './routes/system.js'
+import searchRoutes from './routes/search.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -36,6 +38,8 @@ await fastify.register(proxyRoutes, { prefix: '/api/proxy' })
 await fastify.register(logsRoutes, { prefix: '/api/logs' })
 await fastify.register(overseerrRoutes, { prefix: '/api/overseerr' })
 await fastify.register(healthRoutes, { prefix: '/api/health' })
+await fastify.register(systemRoutes, { prefix: '/api/system' })
+await fastify.register(searchRoutes, { prefix: '/api/search' })
 
 if (fs.existsSync(distPath)) {
   await fastify.register(staticFiles, {

@@ -111,6 +111,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       </nav>
 
       <div className="border-t border-gray-800 py-2">
+        <NavLink path="/search"   label="Search"   active={isActive('/search')}   onNavigate={onClose} />
+        <NavLink path="/system"   label="System"   active={isActive('/system')}   onNavigate={onClose} />
         <NavLink path="/settings" label="Settings" active={isActive('/settings')} onNavigate={onClose} />
         <NavLink path="/logs"     label="Logs"     active={isActive('/logs')}     onNavigate={onClose} />
 
