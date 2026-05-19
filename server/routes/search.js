@@ -48,6 +48,7 @@ export default async function searchRoutes(fastify) {
     return {
       movies: Array.isArray(movRes) ? movRes.slice(0, 8).map(m => ({
         id: m.tmdbId || m.id,
+        tmdbId: m.tmdbId || null,
         title: m.title,
         year: m.year,
         overview: m.overview,
@@ -60,6 +61,7 @@ export default async function searchRoutes(fastify) {
 
       shows: Array.isArray(tvRes) ? tvRes.slice(0, 8).map(s => ({
         id: s.tvdbId || s.id,
+        tmdbId: s.tmdbId || null,
         title: s.title,
         year: s.year,
         overview: s.overview,

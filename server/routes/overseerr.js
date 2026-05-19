@@ -85,4 +85,35 @@ export default async function overseerrRoutes(fastify) {
     const enriched = await enrichWithTitles(svc, data.results ?? [])
     return { ...data, results: enriched }
   })
+
+  fastify.post('/request', async (request, reply) => {
+    const config = await getConfig()
+    const svc = config.services?.overseerr
+    if (!svc?.enabled) return reply.status(400).send({ error: 'Overseerr not enabled' })
+
+    const { mediaType, tmdbId, is4k = false } = request.body ?? {}
+    if (!mediaType || !tmdbId) return reply.status(400).send({ error: 'mediaType and tmdbId required' })
+
+    const payload = {
+      mediaType,
+      mediaId: Number(tmdbId),
+      is4k: !!is4k,
+      ...(mediaType === 'tv' ? { seasons: [] } : {}),
+    }
+
+    try {
+      const baseUrl = svc.url.replace(/\/$/, '')
+      const res = await fetch(`${baseUrl}/api/v1/request`, {
+        method: 'POST',
+        headers: { 'X-Api-Key': svc.apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10000),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) return reply.status(res.status).send({ error: json.message || `Overseerr ${res.status}` })
+      return { ok: true, request: json }
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
 }
