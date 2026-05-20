@@ -54,9 +54,8 @@ export default async function searchRoutes(fastify) {
         overview: m.overview,
         poster: m.remotePoster || null,
         status: m.status,
-        inLibrary: !!m.id && m.hasFile !== undefined,
-        hasFile: m.hasFile,
-        monitored: m.monitored,
+        inPlex: m.hasFile === true,
+        monitored: !!m.id && m.monitored === true,
       })) : [],
 
       shows: Array.isArray(tvRes) ? tvRes.slice(0, 8).map(s => ({
@@ -67,9 +66,10 @@ export default async function searchRoutes(fastify) {
         overview: s.overview,
         poster: s.remotePoster || null,
         status: s.status,
-        inLibrary: !!s.id && s.statistics !== undefined,
+        inPlex: (s.statistics?.episodeFileCount ?? 0) > 0,
+        partialPlex: (s.statistics?.episodeFileCount ?? 0) > 0 && (s.statistics?.episodeFileCount ?? 0) < (s.statistics?.totalEpisodeCount ?? 1),
+        monitored: !!s.id && s.monitored === true,
         seasons: s.statistics?.seasonCount,
-        monitored: s.monitored,
       })) : [],
 
       artists: Array.isArray(musRes) ? musRes.slice(0, 8).map(a => ({

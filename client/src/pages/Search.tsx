@@ -9,9 +9,9 @@ interface SearchResult {
   overview?: string | null
   poster?: string | null
   status?: string | null
-  inLibrary?: boolean
-  hasFile?: boolean
-  monitored?: boolean
+  inPlex?: boolean       // file(s) confirmed present
+  partialPlex?: boolean  // some episodes present, not all (shows only)
+  monitored?: boolean    // tracked by arr but not yet downloaded
   seasons?: number | null
   type?: string | null   // mediaType for Overseerr results ('movie' | 'tv')
 }
@@ -250,8 +250,10 @@ interface ResultRowProps {
 }
 
 function ResultRow({ item, type, mediaType, tmdbId, reqState, reqErr, onPickQuality, onCancelPick, onRequest }: ResultRowProps) {
-  const inLib = item.inLibrary
-  const canRequest = !!mediaType && !!tmdbId && !inLib && !SEERR_ACTIVE_STATUSES.has(item.status ?? '')
+  // For Overseerr tab: 'available' / 'partially_available' means it's in Plex
+  const serrAvailable = item.status === 'available' || item.status === 'partially_available'
+  const inPlex = item.inPlex || serrAvailable
+  const canRequest = !!mediaType && !!tmdbId && !inPlex && !SEERR_ACTIVE_STATUSES.has(item.status ?? '')
 
   const statusText = type === 'show' && item.seasons != null
     ? `${item.seasons} season${item.seasons !== 1 ? 's' : ''}`
@@ -268,14 +270,12 @@ function ResultRow({ item, type, mediaType, tmdbId, reqState, reqErr, onPickQual
     request: item.type === 'movie' ? 'Movie' : item.type === 'tv' ? 'TV' : 'Media',
   }
 
-  // Map seerr status to readable label
+  // Overseerr status badge (pending/processing only — available handled by In Plex badge)
   const serrStatusLabel: Record<string, string> = {
     pending: 'Pending approval',
     processing: 'Downloading',
-    available: 'Available',
-    partially_available: 'Partially available',
   }
-  const serrStatus = item.status ? serrStatusLabel[item.status] : null
+  const serrStatus = item.status ? serrStatusLabel[item.status] ?? null : null
 
   return (
     <div className="px-4 py-3 flex items-start gap-3">
@@ -303,8 +303,13 @@ function ResultRow({ item, type, mediaType, tmdbId, reqState, reqErr, onPickQual
               <p className="text-sm text-white font-medium truncate">
                 {item.title}{item.year ? ` (${item.year})` : ''}
               </p>
-              {inLib && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-green-900/60 text-green-400 shrink-0">In Library</span>
+              {inPlex && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-green-900/60 text-green-400 shrink-0">
+                  {item.partialPlex ? 'Partially in Plex' : 'In Plex'}
+                </span>
+              )}
+              {!inPlex && item.monitored && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-900/60 text-yellow-400 shrink-0">Monitored</span>
               )}
               {serrStatus && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 shrink-0">{serrStatus}</span>
@@ -313,7 +318,7 @@ function ResultRow({ item, type, mediaType, tmdbId, reqState, reqErr, onPickQual
             {item.overview && (
               <p className="text-xs text-gray-500 line-clamp-2">{item.overview}</p>
             )}
-            {statusText && !serrStatus && (
+            {statusText && !serrStatus && !inPlex && (
               <p className="text-xs text-gray-600 mt-0.5 capitalize">{statusText}</p>
             )}
             {reqState === 'error' && reqErr && (
