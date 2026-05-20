@@ -45,32 +45,53 @@ export default async function searchRoutes(fastify) {
     const musRes = artists.status === 'fulfilled' ? artists.value : []
     const reqRes = requests.status === 'fulfilled' ? (requests.value?.results || []) : []
 
-    return {
-      movies: Array.isArray(movRes) ? movRes.slice(0, 8).map(m => ({
-        id: m.tmdbId || m.id,
-        tmdbId: m.tmdbId || null,
-        title: m.title,
-        year: m.year,
-        overview: m.overview,
-        poster: m.remotePoster || null,
-        status: m.status,
-        inPlex: m.hasFile === true,
-        monitored: !!m.id && m.monitored === true,
-      })) : [],
+    // Build Overseerr status map keyed by tmdbId — use ALL results, not just the 8 we display.
+    // Overseerr syncs directly with Plex so its status is the definitive source of truth.
+    // status: 'available' = in Plex, 'partially_available' = some episodes, 'processing' = downloading, 'pending' = awaiting approval
+    const seerrMap = new Map()
+    for (const r of reqRes) {
+      if (r.id && r.mediaInfo?.status) seerrMap.set(r.id, r.mediaInfo.status)
+    }
 
-      shows: Array.isArray(tvRes) ? tvRes.slice(0, 8).map(s => ({
-        id: s.tvdbId || s.id,
-        tmdbId: s.tmdbId || null,
-        title: s.title,
-        year: s.year,
-        overview: s.overview,
-        poster: s.remotePoster || null,
-        status: s.status,
-        inPlex: (s.statistics?.episodeFileCount ?? 0) > 0,
-        partialPlex: (s.statistics?.episodeFileCount ?? 0) > 0 && (s.statistics?.episodeFileCount ?? 0) < (s.statistics?.totalEpisodeCount ?? 1),
-        monitored: !!s.id && s.monitored === true,
-        seasons: s.statistics?.seasonCount,
-      })) : [],
+    return {
+      movies: Array.isArray(movRes) ? movRes.slice(0, 8).map(m => {
+        const seerrStatus = seerrMap.get(m.tmdbId) ?? null
+        const inPlex = m.hasFile === true || seerrStatus === 'available'
+        return {
+          id: m.tmdbId || m.id,
+          tmdbId: m.tmdbId || null,
+          title: m.title,
+          year: m.year,
+          overview: m.overview,
+          poster: m.remotePoster || null,
+          status: seerrStatus,   // use Overseerr status (pending/processing) over Radarr's "released" etc.
+          inPlex,
+          monitored: !!m.id && m.monitored === true && !inPlex,
+        }
+      }) : [],
+
+      shows: Array.isArray(tvRes) ? tvRes.slice(0, 8).map(s => {
+        const seerrStatus = seerrMap.get(s.tmdbId) ?? null
+        const hasFiles = (s.statistics?.episodeFileCount ?? 0) > 0
+        const inPlex = hasFiles || seerrStatus === 'available'
+        const partialPlex = (hasFiles || seerrStatus === 'partially_available') &&
+                            !inPlex &&
+                            seerrStatus !== 'available'
+        return {
+          id: s.tvdbId || s.id,
+          tmdbId: s.tmdbId || null,
+          title: s.title,
+          year: s.year,
+          overview: s.overview,
+          poster: s.remotePoster || null,
+          status: seerrStatus,
+          inPlex,
+          partialPlex: hasFiles && seerrStatus !== 'available' &&
+                       (s.statistics?.episodeFileCount ?? 0) < (s.statistics?.totalEpisodeCount ?? 1),
+          monitored: !!s.id && s.monitored === true && !inPlex,
+          seasons: s.statistics?.seasonCount,
+        }
+      }) : [],
 
       artists: Array.isArray(musRes) ? musRes.slice(0, 8).map(a => ({
         id: a.foreignArtistId || a.id,
