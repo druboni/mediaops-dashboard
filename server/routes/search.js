@@ -3,6 +3,11 @@ import { getConfig } from './config.js'
 
 const arrH = (key) => ({ 'X-Api-Key': key })
 
+// Overseerr MediaStatus enum (numeric) → string
+// 1=Unknown 2=Pending 3=Processing 4=PartiallyAvailable 5=Available
+const SEERR_STATUS = { 1: 'unknown', 2: 'pending', 3: 'processing', 4: 'partially_available', 5: 'available' }
+const seerrStr = (n) => SEERR_STATUS[n] ?? null
+
 async function safeFetch(url, headers = {}, timeout = 6000) {
   try {
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeout) })
@@ -47,10 +52,10 @@ export default async function searchRoutes(fastify) {
 
     // Build Overseerr status map keyed by tmdbId — use ALL results, not just the 8 we display.
     // Overseerr syncs directly with Plex so its status is the definitive source of truth.
-    // status: 'available' = in Plex, 'partially_available' = some episodes, 'processing' = downloading, 'pending' = awaiting approval
+    // Note: mediaInfo.status is a NUMBER (1-5), normalise to string with seerrStr().
     const seerrMap = new Map()
     for (const r of reqRes) {
-      if (r.id && r.mediaInfo?.status) seerrMap.set(r.id, r.mediaInfo.status)
+      if (r.id && r.mediaInfo?.status) seerrMap.set(r.id, seerrStr(r.mediaInfo.status))
     }
 
     return {
@@ -109,7 +114,7 @@ export default async function searchRoutes(fastify) {
         overview: r.overview,
         poster: r.posterPath ? `https://image.tmdb.org/t/p/w200${r.posterPath}` : null,
         type: r.mediaType,
-        status: r.mediaInfo?.status,
+        status: seerrStr(r.mediaInfo?.status),  // normalise number → string
       })) : [],
     }
   })
