@@ -150,7 +150,7 @@ export default function Dashboard() {
       {/* Alerts Banner */}
       {healthData && (healthData.alerts.length > 0 || healthData.indexerStatus.length > 0) && (() => {
         const indexerAlerts = healthData.indexerStatus.filter(s => !dismissedAlerts.has(`indexer-${s.indexerId}`))
-        const healthAlerts  = healthData.alerts.filter((a, i) => !dismissedAlerts.has(`alert-${i}-${a.source}`))
+        const healthAlerts  = healthData.alerts.filter((a) => !dismissedAlerts.has(`alert-${a.source}-${a.service}-${a.message}`))
         if (indexerAlerts.length === 0 && healthAlerts.length === 0) return null
         return (
           <section className="mb-6 space-y-1.5">
@@ -181,7 +181,7 @@ export default function Dashboard() {
                     {a.message}
                   </span>
                 </div>
-                <button onClick={() => dismissAlert(`alert-${i}-${a.source}`)} className={`shrink-0 text-base leading-none transition-colors ${a.level === 'error' ? 'text-red-700 hover:text-red-400' : 'text-yellow-700 hover:text-yellow-400'}`} title="Dismiss">✕</button>
+                <button onClick={() => dismissAlert(`alert-${a.source}-${a.service}-${a.message}`)} className={`shrink-0 text-base leading-none transition-colors ${a.level === 'error' ? 'text-red-700 hover:text-red-400' : 'text-yellow-700 hover:text-yellow-400'}`} title="Dismiss">✕</button>
               </div>
             ))}
           </section>

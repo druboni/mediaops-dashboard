@@ -12,7 +12,6 @@ async function safeFetch(url, timeout = 5000) {
   }
 }
 
-function formatBytes(b) { return b }
 
 async function getGlances(host, port = 61208) {
   const base = `http://${host}:${port}/api/3`

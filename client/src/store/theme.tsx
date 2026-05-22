@@ -13,9 +13,10 @@ const Ctx = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
 })
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(
-    () => (localStorage.getItem('theme') as Theme) || 'default'
-  )
+  const [theme, setThemeState] = useState<Theme>(() => {
+    const stored = localStorage.getItem('theme')
+    return (stored === 'default' || stored === 'cyberpunk') ? stored : 'default'
+  })
 
   const setTheme = (t: Theme) => {
     setThemeState(t)

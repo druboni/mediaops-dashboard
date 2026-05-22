@@ -409,7 +409,7 @@ export default function Requests() {
 
   const closePanel = () => { setSelectedRequest(null); setSelectedIssue(null) }
 
-  const allPages = allData ? Math.ceil(allData.pageInfo.results / TAKE) : 0
+  const allPages = allData?.pageInfo.pages ?? 0
 
   return (
     <div className={`p-6 transition-all duration-200 ${panelOpen ? 'pr-[436px]' : ''}`}>

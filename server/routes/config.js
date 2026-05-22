@@ -20,6 +20,7 @@ const DEFAULT_CONFIG = {
     nzbget:      { enabled: false, url: '', apiKey: '' },
     huntarr:     { enabled: false, url: '', apiKey: '' },
     requestrr:   { enabled: false, url: '', apiKey: '' },
+    tautulli:    { enabled: false, url: '', apiKey: '' },
   },
 }
 
@@ -56,6 +57,8 @@ export default async function configRoutes(fastify) {
     const { default: bcrypt } = await import('bcryptjs')
     const config = await getConfig()
 
+    if (!newPassword || newPassword.length < 8)
+      return reply.status(400).send({ error: 'New password must be at least 8 characters' })
     const valid = await bcrypt.compare(currentPassword, config.adminPasswordHash || '')
     if (!valid) return reply.status(401).send({ error: 'Current password is incorrect' })
 
