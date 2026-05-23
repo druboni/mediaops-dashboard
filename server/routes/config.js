@@ -28,7 +28,14 @@ const DEFAULT_CONFIG = {
 export async function getConfig() {
   try {
     const raw = await readFile(CONFIG_PATH, 'utf8')
-    return JSON.parse(raw)
+    const saved = JSON.parse(raw)
+    // Merge with defaults so new top-level fields (e.g. links) and new
+    // service entries are present even on configs created before they existed.
+    return {
+      ...structuredClone(DEFAULT_CONFIG),
+      ...saved,
+      services: { ...DEFAULT_CONFIG.services, ...(saved.services ?? {}) },
+    }
   } catch {
     return structuredClone(DEFAULT_CONFIG)
   }
