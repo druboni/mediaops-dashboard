@@ -48,6 +48,7 @@ function formatSpeed(bps: number): string {
 function formatEta(seconds: number): string {
   if (seconds < 0) return '—'
   if (seconds === 0) return '—'
+  if (seconds >= 8640000) return '∞'  // qBit sentinel: 8640000s = 100 days = "no peers"
   if (seconds >= 86400) return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
   if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`

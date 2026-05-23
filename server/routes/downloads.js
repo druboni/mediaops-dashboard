@@ -99,12 +99,25 @@ async function getNzbData(url, userpass) {
     nzbRpc(url, userpass, 'status', []),
   ])
 
+  // NZBGet listgroups does NOT include per-group DownloadRate.
+  // The total system download rate (bytes/sec) is in status.DownloadRate.
+  // Assign it to the first actively DOWNLOADING group; others get 0.
+  const totalDlRate = status?.DownloadRate ?? 0
+  let rateAssigned = false
+
   const queue = (groups || []).map((g) => {
     const sizeMB = g.FileSizeMB || 0
     const remainMB = g.RemainingSizeMB || 0
     const dlMB = sizeMB - remainMB
     const remainBytes = mbToBytes(remainMB)
-    const dlRate = g.DownloadRate || 0
+
+    const isDownloading = g.Status === 'DOWNLOADING'
+    let dlRate = 0
+    if (isDownloading && !rateAssigned) {
+      dlRate = totalDlRate
+      rateAssigned = true
+    }
+
     const eta = dlRate > 0 ? Math.round(remainBytes / dlRate) : -1
     return {
       id: String(g.NZBID),
