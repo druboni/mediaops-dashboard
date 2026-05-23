@@ -24,7 +24,7 @@ async function getRadarrData(url, key) {
   const [status, movies, history] = await Promise.all([
     safeFetch(`${url}/api/v3/system/status`, { headers: arrH(key) }),
     safeFetch(`${url}/api/v3/movie`, { headers: arrH(key) }),
-    safeFetch(`${url}/api/v3/history?pageSize=5&sortKey=date&sortDirection=descending&eventType=downloadFolderImported`, { headers: arrH(key) }),
+    safeFetch(`${url}/api/v3/history?pageSize=5&sortKey=date&sortDirection=descending&eventType=3&includeMovie=true`, { headers: arrH(key) }),
   ])
   return {
     health: status.ok ? { ok: true, version: status.data.version } : { ok: false, error: status.error },
@@ -43,7 +43,7 @@ async function getSonarrData(url, key) {
   const [status, series, history] = await Promise.all([
     safeFetch(`${url}/api/v3/system/status`, { headers: arrH(key) }),
     safeFetch(`${url}/api/v3/series`, { headers: arrH(key) }),
-    safeFetch(`${url}/api/v3/history?pageSize=5&sortKey=date&sortDirection=descending&eventType=downloadFolderImported`, { headers: arrH(key) }),
+    safeFetch(`${url}/api/v3/history?pageSize=5&sortKey=date&sortDirection=descending&eventType=3&includeSeries=true&includeEpisode=true`, { headers: arrH(key) }),
   ])
   const seriesData = series.ok && Array.isArray(series.data) ? series.data : []
   return {

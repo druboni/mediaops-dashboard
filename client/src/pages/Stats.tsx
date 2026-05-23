@@ -229,6 +229,9 @@ export default function Stats() {
             <StatList title="Most Watched Movies" items={data.topMovies} accent="bg-blue-500" />
             <StatList title="Most Popular TV" items={data.popularShows} accent="bg-green-600" />
             <StatList title="Most Popular Movies" items={data.popularMovies} accent="bg-blue-600" />
+            {data.topMusic.length > 0 && (
+              <StatList title="Most Played Music" items={data.topMusic} accent="bg-purple-500" />
+            )}
           </div>
 
           {/* Users */}

@@ -28,14 +28,28 @@ export default async function plexRoutes(fastify) {
     if (!res.ok) return reply.status(502).send({ error: res.error })
 
     const sections = res.data?.MediaContainer?.Directory ?? []
+
+    // Fetch item counts for each library in parallel (sections API doesn't include counts)
+    const countResults = await Promise.allSettled(
+      sections.map((s) =>
+        plexFetch(`${base}/library/sections/${s.key}/all?X-Plex-Container-Size=0&X-Plex-Container-Start=0`, svc.apiKey, 5000)
+      )
+    )
+
     return {
-      libraries: sections.map((s) => ({
-        key: s.key,
-        title: s.title,
-        type: s.type,  // 'movie' | 'show' | 'artist'
-        count: s.leafCount ?? null,
-        thumb: s.thumb ?? null,
-      })),
+      libraries: sections.map((s, i) => {
+        const cr = countResults[i]
+        const count = cr.status === 'fulfilled' && cr.value.ok
+          ? (cr.value.data?.MediaContainer?.totalSize ?? null)
+          : null
+        return {
+          key: s.key,
+          title: s.title,
+          type: s.type,  // 'movie' | 'show' | 'artist'
+          count,
+          thumb: s.thumb ?? null,
+        }
+      }),
     }
   })
 
