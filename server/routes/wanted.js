@@ -28,11 +28,11 @@ export default async function wantedRoutes(fastify) {
           )
         : Promise.resolve({ ok: true, data: { records: [] } }),
       sonarr?.enabled
-        ? safeFetch(
-            `${sonarr.url.replace(/\/$/, '')}/api/v3/wanted/missing?pageSize=50&sortKey=airDateUtc&sortDirection=descending`,
-            { headers: arrH(sonarr.apiKey) }
-          )
-        : Promise.resolve({ ok: true, data: { records: [] } }),
+        ? Promise.all([
+            safeFetch(`${sonarr.url.replace(/\/$/, '')}/api/v3/wanted/missing?pageSize=50&sortKey=airDateUtc&sortDirection=descending`, { headers: arrH(sonarr.apiKey) }),
+            safeFetch(`${sonarr.url.replace(/\/$/, '')}/api/v3/series`, { headers: arrH(sonarr.apiKey) }),
+          ])
+        : Promise.resolve([{ ok: true, data: { records: [] } }, { ok: true, data: [] }]),
     ])
 
     const movies = moviesRes.status === 'fulfilled' && moviesRes.value.ok
@@ -47,18 +47,27 @@ export default async function wantedRoutes(fastify) {
         }))
       : []
 
-    const episodes = episodesRes.status === 'fulfilled' && episodesRes.value.ok
-      ? (episodesRes.value.data.records || []).map((e) => ({
+    let episodes = []
+    if (episodesRes.status === 'fulfilled') {
+      const [wantedRes, seriesRes] = episodesRes.value
+      const seriesMap = new Map(
+        seriesRes.ok && Array.isArray(seriesRes.data)
+          ? seriesRes.data.map((s) => [s.id, s.title])
+          : []
+      )
+      if (wantedRes.ok) {
+        episodes = (wantedRes.data.records || []).map((e) => ({
           id: e.id,
           seriesId: e.seriesId,
-          seriesTitle: e.series?.title || 'Unknown',
+          seriesTitle: e.series?.title || seriesMap.get(e.seriesId) || 'Unknown',
           seasonNumber: e.seasonNumber,
           episodeNumber: e.episodeNumber,
           title: e.title,
           monitored: e.monitored,
           airDate: e.airDateUtc || null,
         }))
-      : []
+      }
+    }
 
     return { movies, episodes }
   })

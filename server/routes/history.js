@@ -40,7 +40,7 @@ export default async function historyRoutes(fastify) {
         : null,
       sonarr?.enabled
         ? safeFetch(
-            `${sonarr.url.replace(/\/$/, '')}/api/v3/history?pageSize=${pageSize}&sortKey=date&sortDirection=descending`,
+            `${sonarr.url.replace(/\/$/, '')}/api/v3/history?pageSize=${pageSize}&sortKey=date&sortDirection=descending&includeEpisode=true&includeSeries=true`,
             { headers: arrH(sonarr.apiKey) }
           )
         : null,

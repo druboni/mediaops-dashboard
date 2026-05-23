@@ -55,7 +55,7 @@ export default async function statsRoutes(fastify) {
         title: r.title || r.grandparent_title || r.full_title || '—',
         year: r.year || null,
         plays: r.total_plays ?? r.plays ?? 0,
-        users: r.users_watched ?? null,
+        users: r.users_watched || null,
         thumb: r.thumb || r.grandparent_thumb || null,
         mediaType: r.media_type || null,
       }))

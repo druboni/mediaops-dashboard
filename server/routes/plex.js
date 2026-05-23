@@ -33,7 +33,7 @@ export default async function plexRoutes(fastify) {
         key: s.key,
         title: s.title,
         type: s.type,  // 'movie' | 'show' | 'artist'
-        count: s.count ?? null,
+        count: s.leafCount ?? null,
         thumb: s.thumb ?? null,
       })),
     }
