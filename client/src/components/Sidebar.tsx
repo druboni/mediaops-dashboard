@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useConfig } from '../store/config'
 import { useAuth } from '../store/auth'
-import type { ServiceName } from '../types'
+import type { ServiceName, QuickLink } from '../types'
 
 interface NavItem {
   label: string
@@ -19,11 +19,12 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Media',
     items: [
-      { label: 'Calendar',  path: '/calendar',   anyOf: ['sonarr', 'radarr'] },
-      { label: 'Movies',    path: '/movies',    service: 'radarr' },
-      { label: 'TV Shows',  path: '/tv',         service: 'sonarr' },
-      { label: 'Music',     path: '/music',      service: 'lidarr' },
-      { label: 'Subtitles', path: '/subtitles',  service: 'bazarr' },
+      { label: 'Calendar',     path: '/calendar',   anyOf: ['sonarr', 'radarr'] },
+      { label: 'Movies',       path: '/movies',     service: 'radarr' },
+      { label: 'TV Shows',     path: '/tv',         service: 'sonarr' },
+      { label: 'Music',        path: '/music',      service: 'lidarr' },
+      { label: 'Plex Library', path: '/plex',       service: 'plex' },
+      { label: 'Subtitles',    path: '/subtitles',  service: 'bazarr' },
     ],
   },
   {
@@ -47,8 +48,11 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Utilities',
     items: [
-      { label: 'Hunt',     path: '/hunt',     service: 'huntarr' },
-      { label: 'Activity', path: '/activity', anyOf: ['sonarr', 'radarr', 'lidarr', 'bazarr'] },
+      { label: 'Wanted',    path: '/wanted',   anyOf: ['radarr', 'sonarr'] },
+      { label: 'History',   path: '/history',  anyOf: ['radarr', 'sonarr', 'lidarr'] },
+      { label: 'Stats',     path: '/stats',    service: 'tautulli' },
+      { label: 'Hunt',      path: '/hunt',     service: 'huntarr' },
+      { label: 'Activity',  path: '/activity', anyOf: ['sonarr', 'radarr', 'lidarr', 'bazarr'] },
     ],
   },
 ]
@@ -59,7 +63,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ open, onClose }: SidebarProps) {
-  const { enabledServices } = useConfig()
+  const { enabledServices, config } = useConfig()
   const { logout } = useAuth()
   const location = useLocation()
 
@@ -70,6 +74,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
   }
 
   const isActive = (path: string) => location.pathname === path
+
+  const links: QuickLink[] = config?.links ?? []
 
   return (
     <aside
@@ -108,6 +114,26 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
             </div>
           )
         })}
+
+        {/* Custom quick links */}
+        {links.length > 0 && (
+          <div className="mt-4">
+            <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">Links</p>
+            {links.map((link) => (
+              <a
+                key={link.url}
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onClose}
+                className="flex items-center px-4 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors gap-2"
+              >
+                <span className="truncate">{link.label}</span>
+                <span className="text-gray-700 text-xs shrink-0">↗</span>
+              </a>
+            ))}
+          </div>
+        )}
       </nav>
 
       <div className="border-t border-gray-800 py-2">

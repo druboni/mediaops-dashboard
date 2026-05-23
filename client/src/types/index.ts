@@ -19,7 +19,13 @@ export interface ServiceConfig {
   apiKey: string
 }
 
+export interface QuickLink {
+  label: string
+  url: string
+}
+
 export interface Config {
   services: Record<ServiceName, ServiceConfig>
+  links?: QuickLink[]
   adminPasswordHash?: string
 }

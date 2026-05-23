@@ -19,6 +19,10 @@ import Settings from './pages/Settings'
 import Logs from './pages/Logs'
 import Search from './pages/Search'
 import System from './pages/System'
+import Wanted from './pages/Wanted'
+import History from './pages/History'
+import Stats from './pages/Stats'
+import PlexLibrary from './pages/PlexLibrary'
 import Layout from './components/Layout'
 
 const queryClient = new QueryClient()
@@ -57,6 +61,10 @@ function AppRoutes() {
         <Route path="hunt" element={<Hunt />} />
         <Route path="search" element={<Search />} />
         <Route path="system" element={<System />} />
+        <Route path="wanted" element={<Wanted />} />
+        <Route path="history" element={<History />} />
+        <Route path="stats" element={<Stats />} />
+        <Route path="plex" element={<PlexLibrary />} />
         <Route path="settings" element={<Settings />} />
         <Route path="logs" element={<Logs />} />
       </Route>

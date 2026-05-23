@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useConfig } from '../store/config'
 import { useTheme, THEMES } from '../store/theme'
 import api from '../services/api'
-import type { Config, ServiceName, ServiceConfig } from '../types'
+import type { Config, ServiceName, ServiceConfig, QuickLink } from '../types'
 
 interface ServiceMeta {
   label: string
@@ -52,6 +52,8 @@ export default function Settings() {
   const [testStatus, setTestStatus] = useState<Partial<Record<ServiceName, TestStatus>>>({})
   const [testError, setTestError] = useState<Partial<Record<ServiceName, string>>>({})
   const [showKey, setShowKey] = useState<Partial<Record<ServiceName, boolean>>>({})
+  const [links, setLinks] = useState<QuickLink[]>([])
+  const [newLink, setNewLink] = useState<{ label: string; url: string }>({ label: '', url: '' })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -62,6 +64,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (config?.services) setServices(config.services)
+    if (config?.links) setLinks(config.links)
   }, [config])
 
   const updateService = (name: ServiceName, field: keyof ServiceConfig, value: string | boolean) => {
@@ -90,7 +93,7 @@ export default function Settings() {
     setSaving(true)
     setSaved(false)
     try {
-      await updateConfig({ ...config!, services })
+      await updateConfig({ ...config!, services, links })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } finally {
@@ -205,6 +208,58 @@ export default function Settings() {
           </section>
         ))}
       </div>
+
+      {/* Quick Links */}
+      <section className="mt-10 pt-8 border-t border-gray-800">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Quick Links</h2>
+        <p className="text-xs text-gray-600 mb-4">Bookmarks that appear in the sidebar under "Links"</p>
+        <div className="space-y-2 mb-3">
+          {links.map((link, i) => (
+            <div key={i} className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+              <span className="text-sm text-white flex-1 truncate">{link.label}</span>
+              <span className="text-xs text-gray-600 truncate max-w-[200px]">{link.url}</span>
+              <button
+                onClick={() => setLinks((prev) => prev.filter((_, j) => j !== i))}
+                className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {links.length === 0 && (
+            <p className="text-xs text-gray-600 py-2">No links yet</p>
+          )}
+        </div>
+        <div className="flex gap-2 items-end">
+          <div className="flex-1 space-y-2">
+            <input
+              type="text"
+              placeholder="Label (e.g. Plex)"
+              value={newLink.label}
+              onChange={(e) => setNewLink((p) => ({ ...p, label: e.target.value }))}
+              className="input w-full"
+            />
+            <input
+              type="url"
+              placeholder="URL (e.g. http://192.168.1.x:32400)"
+              value={newLink.url}
+              onChange={(e) => setNewLink((p) => ({ ...p, url: e.target.value }))}
+              className="input w-full"
+            />
+          </div>
+          <button
+            onClick={() => {
+              if (!newLink.label || !newLink.url) return
+              setLinks((prev) => [...prev, { label: newLink.label, url: newLink.url }])
+              setNewLink({ label: '', url: '' })
+            }}
+            disabled={!newLink.label || !newLink.url}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap h-fit"
+          >
+            Add
+          </button>
+        </div>
+      </section>
 
       <section className="mt-10 pt-8 border-t border-gray-800">
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">

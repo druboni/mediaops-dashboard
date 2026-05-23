@@ -321,6 +321,8 @@ export default function Requests() {
   const [allPage, setAllPage] = useState(0)
   const [selectedRequest, setSelectedRequest] = useState<OverseerrRequest | null>(null)
   const [selectedIssue, setSelectedIssue] = useState<OverseerrIssue | null>(null)
+  const [batchIds, setBatchIds] = useState<Set<number>>(new Set())
+  const [batchPending, setBatchPending] = useState(false)
 
   const enabled = enabledServices.includes('overseerr')
 
@@ -409,6 +411,30 @@ export default function Requests() {
 
   const closePanel = () => { setSelectedRequest(null); setSelectedIssue(null) }
 
+  const toggleBatch = (id: number) => setBatchIds((prev) => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
+  const batchApprove = async () => {
+    if (!batchIds.size) return
+    setBatchPending(true)
+    await Promise.allSettled([...batchIds].map((id) => api.post(`/proxy/overseerr/api/v1/request/${id}/approve`)))
+    setBatchIds(new Set())
+    setBatchPending(false)
+    invalidateAll()
+  }
+
+  const batchDecline = async () => {
+    if (!batchIds.size) return
+    setBatchPending(true)
+    await Promise.allSettled([...batchIds].map((id) => api.post(`/proxy/overseerr/api/v1/request/${id}/decline`)))
+    setBatchIds(new Set())
+    setBatchPending(false)
+    invalidateAll()
+  }
+
   const allPages = allData?.pageInfo.pages ?? 0
 
   return (
@@ -447,6 +473,32 @@ export default function Requests() {
       {/* ── Pending Tab ── */}
       {tab === 'pending' && (
         <>
+          {/* Batch action bar */}
+          {batchIds.size > 0 && (
+            <div className="flex items-center gap-3 mb-3 px-4 py-2.5 bg-blue-900/20 border border-blue-800/50 rounded-lg">
+              <span className="text-xs text-blue-300 flex-1">{batchIds.size} selected</span>
+              <button
+                onClick={batchApprove}
+                disabled={batchPending}
+                className="text-xs px-3 py-1.5 rounded bg-green-700 hover:bg-green-600 text-white transition-colors disabled:opacity-50"
+              >
+                Approve all
+              </button>
+              <button
+                onClick={batchDecline}
+                disabled={batchPending}
+                className="text-xs px-3 py-1.5 rounded bg-gray-700 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+              >
+                Decline all
+              </button>
+              <button
+                onClick={() => setBatchIds(new Set())}
+                className="text-xs text-gray-500 hover:text-white transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          )}
           {pendingLoading ? (
             <LoadingSkeleton />
           ) : !pendingData?.results.length ? (
@@ -460,6 +512,8 @@ export default function Requests() {
               onDecline={(id) => decline.mutate(id)}
               onDelete={(id) => deleteRequest.mutate(id)}
               showActions
+              batchIds={batchIds}
+              onToggleBatch={toggleBatch}
             />
           )}
         </>
@@ -651,7 +705,7 @@ export default function Requests() {
 // ── Shared sub-components ──────────────────────────────────────────────────
 
 function RequestTable({
-  requests, selected, onSelect, onApprove, onDecline, onDelete, showActions, showStatus,
+  requests, selected, onSelect, onApprove, onDecline, onDelete, showActions, showStatus, batchIds, onToggleBatch,
 }: {
   requests: OverseerrRequest[]
   selected: OverseerrRequest | null
@@ -661,12 +715,15 @@ function RequestTable({
   onDelete: (id: number) => void
   showActions?: boolean
   showStatus?: boolean
+  batchIds?: Set<number>
+  onToggleBatch?: (id: number) => void
 }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
+            {onToggleBatch && <th className="w-8 px-3 py-2.5" />}
             <th className="text-left px-4 py-2.5 font-medium">Title</th>
             <th className="text-left px-4 py-2.5 font-medium hidden sm:table-cell">Requested by</th>
             <th className="text-left px-4 py-2.5 font-medium hidden sm:table-cell">Date</th>
@@ -683,8 +740,18 @@ function RequestTable({
               <tr
                 key={req.id}
                 onClick={() => onSelect(req)}
-                className={`cursor-pointer transition-colors group ${isActive ? 'bg-blue-900/20' : 'hover:bg-gray-800/40'}`}
+                className={`cursor-pointer transition-colors group ${isActive ? 'bg-blue-900/20' : batchIds?.has(req.id) ? 'bg-blue-950/40' : 'hover:bg-gray-800/40'}`}
               >
+                {onToggleBatch && (
+                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={batchIds?.has(req.id) ?? false}
+                      onChange={() => onToggleBatch(req.id)}
+                      className="rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${

@@ -7,6 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const CONFIG_PATH = process.env.CONFIG_PATH || join(__dirname, '../../config/config.json')
 
 const DEFAULT_CONFIG = {
+  links: [],
   services: {
     plex:        { enabled: false, url: '', apiKey: '' },
     sonarr:      { enabled: false, url: '', apiKey: '' },
@@ -48,6 +49,7 @@ export default async function configRoutes(fastify) {
   fastify.put('/', async (request) => {
     const current = await getConfig()
     const updated = { ...current, services: request.body.services }
+    if (Array.isArray(request.body.links)) updated.links = request.body.links
     await saveConfig(updated)
     return updated
   })

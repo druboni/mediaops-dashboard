@@ -76,6 +76,46 @@ const SERVICE_LABELS: Partial<Record<ServiceName, string>> = {
   huntarr: 'Huntarr', requestrr: 'Requestrr', tautulli: 'Tautulli',
 }
 
+// ── Browser notifications ──────────────────────────────────────────────────
+function useDownloadNotifications(recentlyDownloaded: { name: string; date: string; client: string }[]) {
+  useEffect(() => {
+    if (!recentlyDownloaded.length) return
+    if (typeof Notification === 'undefined') return
+
+    // Request permission silently (won't prompt if already granted/denied)
+    if (Notification.permission === 'default') {
+      Notification.requestPermission()
+      return
+    }
+    if (Notification.permission !== 'granted') return
+
+    const storageKey = 'mediaops_seen_downloads'
+    const seen: string[] = JSON.parse(localStorage.getItem(storageKey) ?? '[]')
+    const seenSet = new Set(seen)
+
+    const newItems = recentlyDownloaded.filter((item) => {
+      const id = `${item.client}-${item.name}-${item.date}`
+      return !seenSet.has(id)
+    })
+
+    if (newItems.length > 0) {
+      newItems.forEach((item) => {
+        new Notification('MediaOps — Download Complete', {
+          body: item.name,
+          icon: '/favicon.ico',
+          tag: `${item.client}-${item.name}`,
+          silent: false,
+        })
+      })
+      const allSeen = [
+        ...seen,
+        ...newItems.map((i) => `${i.client}-${i.name}-${i.date}`),
+      ].slice(-100) // cap at 100
+      localStorage.setItem(storageKey, JSON.stringify(allSeen))
+    }
+  }, [recentlyDownloaded])
+}
+
 export default function Dashboard() {
   const { enabledServices, isLoading: configLoading } = useConfig()
   const navigate = useNavigate()
@@ -113,6 +153,8 @@ export default function Dashboard() {
     mutationFn: (id: number) => api.post(`/services/overseerr/requests/${id}/decline`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
   })
+
+  useDownloadNotifications(data?.recentlyDownloaded ?? [])
 
   if (configLoading || isLoading) {
     return (
