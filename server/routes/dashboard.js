@@ -83,10 +83,12 @@ async function getLidarrData(url, key) {
 
 async function getTautulliData(url, key) {
   const base = `${url}/api/v2?apikey=${encodeURIComponent(key)}`
-  const [libResult, histResult] = await Promise.all([
+  const [libResult, histResult, infoResult] = await Promise.all([
     safeFetch(`${base}&cmd=get_libraries_table`),
     safeFetch(`${base}&cmd=get_history&length=15&order_column=date&order_dir=desc`),
+    safeFetch(`${base}&cmd=get_tautulli_info`),
   ])
+  const tautulliVersion = infoResult.ok ? (infoResult.data?.response?.data?.tautulli_version?.replace(/^v/, '') ?? null) : null
 
   const libOk = libResult.ok && libResult.data?.response?.result === 'success'
   let movieCount = null, showCount = null, episodeCount = null, musicCount = null
@@ -110,12 +112,14 @@ async function getTautulliData(url, key) {
     }))
   }
 
-  return { health: { ok: libOk }, movieCount, showCount, episodeCount, musicCount, recentlyPlayed }
+  return { health: { ok: libOk, ...(tautulliVersion ? { version: tautulliVersion } : {}) }, movieCount, showCount, episodeCount, musicCount, recentlyPlayed }
 }
 
-async function getSimpleHealth(url, path, headers = {}) {
+async function getSimpleHealth(url, path, headers = {}, extractVersion = null) {
   const r = await safeFetch(`${url}${path}`, { headers })
-  return { health: r.ok ? { ok: true } : { ok: false, error: r.error } }
+  if (!r.ok) return { health: { ok: false, error: r.error } }
+  const version = extractVersion ? extractVersion(r.data) : null
+  return { health: { ok: true, ...(version ? { version } : {}) } }
 }
 
 async function getOverseerrData(url, key) {
@@ -144,8 +148,9 @@ async function getPlexData(url, token) {
     safeFetch(`${url}/status/sessions`, { headers }),
   ])
   const meta = sessions.ok ? (sessions.data.MediaContainer?.Metadata || []) : []
+  const plexVersion = identity.ok ? (identity.data?.MediaContainer?.version ?? null) : null
   return {
-    health: identity.ok ? { ok: true } : { ok: false, error: identity.error },
+    health: identity.ok ? { ok: true, ...(plexVersion ? { version: plexVersion } : {}) } : { ok: false, error: identity.error },
     activeStreams: sessions.ok ? (sessions.data.MediaContainer?.size ?? meta.length) : null,
     streamDetails: meta.map((m) => {
       const media = m.Media?.[0] || {}
@@ -174,10 +179,11 @@ async function getPlexData(url, token) {
 async function getQbitData(url, userpass) {
   try {
     const cookie = await getQbitSid(url, userpass)
-    const [info, active, completed] = await Promise.all([
+    const [info, active, completed, versionText] = await Promise.all([
       fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/torrents/info?filter=active`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/torrents/info?filter=completed&sort=completion_on&reverse=true&limit=10`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
+      fetch(`${url}/api/v2/app/version`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.text()).catch(() => null),
     ])
     const recentlyDownloaded = Array.isArray(completed)
       ? completed
@@ -185,7 +191,7 @@ async function getQbitData(url, userpass) {
           .map((t) => ({ name: t.name, date: new Date(t.completion_on * 1000).toISOString(), size: t.size, client: 'qbittorrent' }))
       : []
     return {
-      health: { ok: true },
+      health: { ok: true, ...(versionText ? { version: versionText.trim() } : {}) },
       dlSpeed: info.dl_info_speed || 0,
       upSpeed: info.up_info_speed || 0,
       activeCount: Array.isArray(active) ? active.length : 0,
@@ -203,11 +209,13 @@ async function getNzbgetData(url, userpass) {
   const auth = Buffer.from(`${user}:${pass}`).toString('base64')
   const headers = { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` }
 
-  const [statusRes, histRes] = await Promise.all([
+  const [statusRes, histRes, versionRes] = await Promise.all([
     safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'status', params: [] }) }),
     safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'history', params: [false] }) }),
+    safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'version', params: [] }) }),
   ])
   if (!statusRes.ok) return { health: { ok: false, error: statusRes.error } }
+  const nzbVersion = versionRes.ok ? versionRes.data?.result : null
 
   const result = statusRes.data.result || {}
   const recentlyDownloaded = histRes.ok && Array.isArray(histRes.data.result)
@@ -217,7 +225,7 @@ async function getNzbgetData(url, userpass) {
         .map((h) => ({ name: h.NZBName, date: new Date(h.HistoryTime * 1000).toISOString(), size: h.FileSizeMB * 1024 * 1024, client: 'nzbget' }))
     : []
   return {
-    health: { ok: true },
+    health: { ok: true, ...(nzbVersion ? { version: nzbVersion } : {}) },
     dlSpeed: result.DownloadRate || 0,
     activeCount: (result.RemainingSizeMB || 0) > 0 ? 1 : 0,
     recentlyDownloaded,
@@ -238,9 +246,9 @@ export default async function dashboardRoutes(fastify) {
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
         on('lidarr')      ? getLidarrData(at('lidarr').url, at('lidarr').key)             : null,
-        on('bazarr')      ? getSimpleHealth(at('bazarr').url, '/api/system/status', arrH(at('bazarr').key)) : null,
+        on('bazarr')      ? getSimpleHealth(at('bazarr').url, '/api/system/status', arrH(at('bazarr').key), d => d?.data?.bazarr_version) : null,
         on('overseerr')   ? getOverseerrData(at('overseerr').url, at('overseerr').key)   : null,
-        on('prowlarr')    ? getSimpleHealth(at('prowlarr').url, '/api/v1/system/status', arrH(at('prowlarr').key)) : null,
+        on('prowlarr')    ? getSimpleHealth(at('prowlarr').url, '/api/v1/system/status', arrH(at('prowlarr').key), d => d?.version) : null,
         on('jackett')     ? getSimpleHealth(at('jackett').url, `/api/v2.0/indexers?apikey=${at('jackett').key}`) : null,
         on('plex')        ? getPlexData(at('plex').url, at('plex').key)                   : null,
         on('qbittorrent') ? getQbitData(at('qbittorrent').url, at('qbittorrent').key)     : null,
