@@ -19,9 +19,22 @@ interface DownloadItem {
   canDeleteFiles: boolean
 }
 
+interface ImportingItem {
+  id: string
+  service: 'sonarr' | 'radarr'
+  mediaTitle: string | null
+  title: string
+  state: 'importPending' | 'importing'
+  downloadClient: string | null
+  protocol: 'torrent' | 'usenet' | null
+  size: number
+  statusMessages: string[]
+}
+
 interface DownloadsData {
   queue: DownloadItem[]
   completed: DownloadItem[]
+  importing: ImportingItem[]
   limits: {
     qbittorrent: { speedLimitMode: number } | null
     nzbget: { speedLimit: number } | null
@@ -208,6 +221,66 @@ export default function Downloads() {
           </button>
         ))}
       </div>
+
+      {/* Importing panel */}
+      {data && data.importing.length > 0 && (
+        <div className="mb-5 bg-violet-950/30 border border-violet-800/50 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-violet-800/40">
+            {/* pulsing spinner */}
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-violet-500" />
+            </span>
+            <span className="text-xs font-semibold text-violet-300 uppercase tracking-wide">
+              Importing to Library
+            </span>
+            <span className="ml-auto text-xs text-violet-500">{data.importing.length} item{data.importing.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="divide-y divide-violet-800/20">
+            {data.importing.map((item) => (
+              <div key={`${item.service}-${item.id}`} className="flex items-center gap-3 px-4 py-3">
+                {/* service badge */}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                  item.service === 'sonarr'
+                    ? 'bg-blue-900/60 text-blue-300'
+                    : 'bg-yellow-900/60 text-yellow-300'
+                }`}>
+                  {item.service === 'sonarr' ? 'TV' : 'Movie'}
+                </span>
+
+                {/* titles */}
+                <div className="flex-1 min-w-0">
+                  {item.mediaTitle && (
+                    <div className="text-white text-sm font-medium truncate">{item.mediaTitle}</div>
+                  )}
+                  <div className={`truncate ${item.mediaTitle ? 'text-xs text-violet-300/70' : 'text-sm text-white'}`}>
+                    {item.title}
+                  </div>
+                  {item.statusMessages.length > 0 && (
+                    <div className="text-xs text-amber-400 mt-0.5 truncate">{item.statusMessages[0]}</div>
+                  )}
+                </div>
+
+                {/* size */}
+                {item.size > 0 && (
+                  <span className="text-xs text-gray-500 tabular-nums shrink-0 hidden sm:block">
+                    {formatBytes(item.size)}
+                  </span>
+                )}
+
+                {/* state pill */}
+                <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 font-medium ${
+                  item.state === 'importing'
+                    ? 'bg-violet-700/60 text-violet-200'
+                    : 'bg-gray-700/60 text-gray-400'
+                }`}>
+                  {item.state === 'importing' ? 'Copying…' : 'Pending'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filters + errors */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">

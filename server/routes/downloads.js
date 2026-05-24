@@ -92,6 +92,55 @@ async function getQbitData(url, password) {
   return { queue, completed, speedLimitMode: parseInt(speedLimitModeText) || 0 }
 }
 
+async function getArrQueue(url, apiKey, service) {
+  try {
+    const endpoint = service === 'sonarr'
+      ? `${url}/api/v3/queue?pageSize=100&includeSeries=true&includeEpisode=true`
+      : `${url}/api/v3/queue?pageSize=100&includeMovie=true`
+    const res = await fetch(endpoint, {
+      headers: { 'X-Api-Key': apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return []
+    const json = await res.json()
+    const records = json.records ?? json ?? []
+    return records
+      .filter((r) => {
+        const state = r.trackedDownloadState
+        return state === 'importPending' || state === 'importing'
+      })
+      .map((r) => {
+        let title = r.title || 'Unknown'
+        let mediaTitle = null
+        if (service === 'sonarr') {
+          const series = r.series?.title || null
+          const ep = r.episode
+          if (ep) {
+            const code = `S${String(ep.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`
+            title = ep.title ? `${code} – ${ep.title}` : code
+          }
+          mediaTitle = series
+        } else {
+          mediaTitle = r.movie?.title || r.title || null
+          title = mediaTitle || title
+        }
+        return {
+          id: String(r.id),
+          service,
+          mediaTitle,
+          title,
+          state: r.trackedDownloadState,   // 'importPending' | 'importing'
+          downloadClient: r.downloadClient || null,
+          protocol: r.protocol || null,    // 'torrent' | 'usenet'
+          size: r.size || 0,
+          statusMessages: (r.statusMessages || []).flatMap((s) => s.messages || []),
+        }
+      })
+  } catch {
+    return []
+  }
+}
+
 async function getNzbData(url, userpass) {
   const [groups, history, status] = await Promise.all([
     nzbRpc(url, userpass, 'listgroups', [0]),
@@ -164,13 +213,19 @@ export default async function downloadsRoutes(fastify) {
     const on = (name) => svcs[name]?.enabled
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
-    const [qbitResult, nzbResult] = await Promise.allSettled([
+    const [qbitResult, nzbResult, sonarrQueue, radarrQueue] = await Promise.allSettled([
       on('qbittorrent') ? getQbitData(at('qbittorrent').url, at('qbittorrent').key) : Promise.resolve(null),
       on('nzbget') ? getNzbData(at('nzbget').url, at('nzbget').key) : Promise.resolve(null),
+      on('sonarr') ? getArrQueue(at('sonarr').url, at('sonarr').key, 'sonarr') : Promise.resolve([]),
+      on('radarr') ? getArrQueue(at('radarr').url, at('radarr').key, 'radarr') : Promise.resolve([]),
     ])
 
     const qbit = qbitResult.status === 'fulfilled' ? qbitResult.value : null
     const nzb = nzbResult.status === 'fulfilled' ? nzbResult.value : null
+    const importing = [
+      ...(sonarrQueue.status === 'fulfilled' ? sonarrQueue.value : []),
+      ...(radarrQueue.status === 'fulfilled' ? radarrQueue.value : []),
+    ]
 
     return {
       queue: [
@@ -181,6 +236,7 @@ export default async function downloadsRoutes(fastify) {
         ...(qbit?.completed || []),
         ...(nzb?.completed || []),
       ],
+      importing,
       limits: {
         qbittorrent: on('qbittorrent') ? { speedLimitMode: qbit?.speedLimitMode ?? 0 } : null,
         nzbget: on('nzbget') ? { speedLimit: nzb?.speedLimit ?? 0 } : null,
