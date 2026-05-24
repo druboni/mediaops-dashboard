@@ -15,6 +15,31 @@ async function plexFetch(url, token, timeout = 8000) {
 }
 
 export default async function plexRoutes(fastify) {
+  // Thumbnail proxy — no JWT required because <img> tags can't send Authorization
+  // headers. The Plex token is kept server-side so it's never exposed to the browser.
+  fastify.get('/thumb', {
+    config: { skipAuth: true },
+    schema: { hide: true },
+  }, async (request, reply) => {
+    const { path: thumbPath } = request.query
+    if (!thumbPath || !thumbPath.startsWith('/')) {
+      return reply.status(400).send()
+    }
+    const config = await getConfig()
+    const svc = config.services.plex
+    if (!svc?.enabled) return reply.status(400).send()
+    const url = `${svc.url.replace(/\/$/, '')}${thumbPath}?X-Plex-Token=${svc.apiKey}`
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+      if (!res.ok) return reply.status(res.status).send()
+      reply.header('Content-Type', res.headers.get('content-type') || 'image/jpeg')
+      reply.header('Cache-Control', 'public, max-age=86400')
+      return reply.send(Buffer.from(await res.arrayBuffer()))
+    } catch {
+      return reply.status(502).send()
+    }
+  })
+
   fastify.addHook('preHandler', requireAuth)
 
   // List all libraries
@@ -78,7 +103,7 @@ export default async function plexRoutes(fastify) {
       title: m.title,
       year: m.year ?? null,
       type: m.type,  // 'movie' | 'show' | 'artist'
-      thumb: m.thumb ? `${base}${m.thumb}?X-Plex-Token=${svc.apiKey}` : null,
+      thumb: m.thumb ? `/api/plex/thumb?path=${encodeURIComponent(m.thumb)}` : null,
       summary: m.summary ?? null,
       rating: m.rating ?? null,
       audienceRating: m.audienceRating ?? null,
