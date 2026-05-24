@@ -101,10 +101,15 @@ async function getArrQueue(url, apiKey, service) {
       headers: { 'X-Api-Key': apiKey, Accept: 'application/json' },
       signal: AbortSignal.timeout(8000),
     })
-    if (!res.ok) return []
+    if (!res.ok) return { importing: [], allHashes: new Set() }
     const json = await res.json()
     const records = json.records ?? json ?? []
-    return records
+
+    // Collect every download ID in the queue (all states) so the client can
+    // identify which seeding torrents Sonarr/Radarr is still tracking.
+    const allHashes = new Set(records.map((r) => r.downloadId).filter(Boolean))
+
+    const importing = records
       .filter((r) => {
         const state = r.trackedDownloadState
         return state === 'importPending' || state === 'importing'
@@ -137,8 +142,10 @@ async function getArrQueue(url, apiKey, service) {
           statusMessages: (r.statusMessages || []).flatMap((s) => s.messages || []),
         }
       })
+
+    return { importing, allHashes }
   } catch {
-    return []
+    return { importing: [], allHashes: new Set() }
   }
 }
 
@@ -223,10 +230,12 @@ export default async function downloadsRoutes(fastify) {
 
     const qbit = qbitResult.status === 'fulfilled' ? qbitResult.value : null
     const nzb = nzbResult.status === 'fulfilled' ? nzbResult.value : null
-    const importing = [
-      ...(sonarrQueue.status === 'fulfilled' ? sonarrQueue.value : []),
-      ...(radarrQueue.status === 'fulfilled' ? radarrQueue.value : []),
-    ]
+    const sonarr = sonarrQueue.status === 'fulfilled' ? sonarrQueue.value : { importing: [], allHashes: new Set() }
+    const radarr = radarrQueue.status === 'fulfilled' ? radarrQueue.value : { importing: [], allHashes: new Set() }
+    const importing = [...sonarr.importing, ...radarr.importing]
+    // Union of all download IDs currently tracked by Sonarr+Radarr (any state).
+    // Used by the client to identify seeding torrents that have already been imported.
+    const arrQueueHashes = [...sonarr.allHashes, ...radarr.allHashes]
 
     return {
       queue: [
@@ -238,6 +247,7 @@ export default async function downloadsRoutes(fastify) {
         ...(nzb?.completed || []),
       ],
       importing,
+      arrQueueHashes,
       limits: {
         qbittorrent: on('qbittorrent') ? { speedLimitMode: qbit?.speedLimitMode ?? 0 } : null,
         nzbget: on('nzbget') ? { speedLimit: nzb?.speedLimit ?? 0 } : null,

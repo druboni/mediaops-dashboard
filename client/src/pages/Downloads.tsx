@@ -36,6 +36,7 @@ interface DownloadsData {
   queue: DownloadItem[]
   completed: DownloadItem[]
   importing: ImportingItem[]
+  arrQueueHashes: string[]   // all download IDs currently tracked by Sonarr/Radarr
   limits: {
     qbittorrent: { speedLimitMode: number } | null
     nzbget: { speedLimit: number } | null
@@ -188,6 +189,22 @@ export default function Downloads() {
     qbitAction.mutate({ hash, action: 'delete', deleteFiles: true })
   }, [qbitAction])
   useAutoDelete(data?.importing, autoDelete, handleAutoDelete)
+
+  // When the toggle is first turned ON, sweep any seeding qBit torrents that
+  // Sonarr/Radarr is no longer tracking (i.e. already imported).
+  const prevAutoDelete = useRef(autoDelete)
+  useEffect(() => {
+    const justEnabled = autoDelete && !prevAutoDelete.current
+    prevAutoDelete.current = autoDelete
+    if (!justEnabled || !data) return
+    const arrHashes = new Set(data.arrQueueHashes ?? [])
+    const seedingOrphans = data.queue.filter(
+      (item) => item.client === 'qbittorrent' && item.status === 'seeding' && !arrHashes.has(item.id)
+    )
+    for (const item of seedingOrphans) {
+      qbitAction.mutate({ hash: item.id, action: 'delete', deleteFiles: true })
+    }
+  }, [autoDelete, data, qbitAction])
 
   const nzbAction = useMutation({
     mutationFn: (body: { id: string; action: string }) =>
