@@ -177,17 +177,17 @@ export default function Downloads() {
 
   const getImportStart = useImportingTimestamps(data?.importing)
 
-  const autoDelete = config?.autoDeleteAfterImport ?? false
-  const handleAutoDelete = useCallback((hash: string) => {
-    qbitAction.mutate({ hash, action: 'delete', deleteFiles: true })
-  }, [qbitAction])
-  useAutoDelete(data?.importing, autoDelete, handleAutoDelete)
-
   const qbitAction = useMutation({
     mutationFn: (body: { hash: string; action: string; deleteFiles?: boolean }) =>
       api.post('/downloads/qbittorrent/action', body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
+
+  const autoDelete = config?.autoDeleteAfterImport ?? false
+  const handleAutoDelete = useCallback((hash: string) => {
+    qbitAction.mutate({ hash, action: 'delete', deleteFiles: true })
+  }, [qbitAction])
+  useAutoDelete(data?.importing, autoDelete, handleAutoDelete)
 
   const nzbAction = useMutation({
     mutationFn: (body: { id: string; action: string }) =>
