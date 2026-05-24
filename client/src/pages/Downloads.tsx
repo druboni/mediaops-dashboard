@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
@@ -91,6 +91,39 @@ function ClientBadge({ client }: { client: 'qbittorrent' | 'nzbget' }) {
   )
 }
 
+// Track when each item first entered 'importing' state so we can show elapsed time + avg rate.
+// Key = `${service}-${id}`, value = Date.now() when first seen as 'importing'.
+function useImportingTimestamps(importing: ImportingItem[] | undefined) {
+  const startTimes = useRef<Map<string, number>>(new Map())
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    if (!importing) return
+    const keys = new Set<string>()
+    for (const item of importing) {
+      const key = `${item.service}-${item.id}`
+      keys.add(key)
+      if (item.state === 'importing' && !startTimes.current.has(key)) {
+        startTimes.current.set(key, Date.now())
+      }
+    }
+    // Remove stale entries
+    for (const k of startTimes.current.keys()) {
+      if (!keys.has(k)) startTimes.current.delete(k)
+    }
+  }, [importing])
+
+  // Tick every second while anything is actively importing
+  useEffect(() => {
+    const active = importing?.some((i) => i.state === 'importing') ?? false
+    if (!active) return
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [importing])
+
+  return (key: string) => startTimes.current.get(key) ?? null
+}
+
 export default function Downloads() {
   const { enabledServices } = useConfig()
   const queryClient = useQueryClient()
@@ -108,6 +141,8 @@ export default function Downloads() {
     refetchInterval: 10_000,
     enabled: hasQbit || hasNzb,
   })
+
+  const getImportStart = useImportingTimestamps(data?.importing)
 
   const qbitAction = useMutation({
     mutationFn: (body: { hash: string; action: string; deleteFiles?: boolean }) =>
@@ -226,7 +261,6 @@ export default function Downloads() {
       {data && data.importing.length > 0 && (
         <div className="mb-5 bg-violet-950/30 border border-violet-800/50 rounded-xl overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-2.5 border-b border-violet-800/40">
-            {/* pulsing spinner */}
             <span className="relative flex h-2.5 w-2.5 shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-violet-500" />
@@ -234,50 +268,82 @@ export default function Downloads() {
             <span className="text-xs font-semibold text-violet-300 uppercase tracking-wide">
               Importing to Library
             </span>
-            <span className="ml-auto text-xs text-violet-500">{data.importing.length} item{data.importing.length !== 1 ? 's' : ''}</span>
+            <span className="ml-auto text-xs text-violet-500">
+              {data.importing.length} item{data.importing.length !== 1 ? 's' : ''}
+            </span>
           </div>
           <div className="divide-y divide-violet-800/20">
-            {data.importing.map((item) => (
-              <div key={`${item.service}-${item.id}`} className="flex items-center gap-3 px-4 py-3">
-                {/* service badge */}
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
-                  item.service === 'sonarr'
-                    ? 'bg-blue-900/60 text-blue-300'
-                    : 'bg-yellow-900/60 text-yellow-300'
-                }`}>
-                  {item.service === 'sonarr' ? 'TV' : 'Movie'}
-                </span>
+            {data.importing.map((item) => {
+              const key = `${item.service}-${item.id}`
+              const startedAt = getImportStart(key)
+              const elapsedSec = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0
+              // Estimated avg rate: size / elapsed (only meaningful after a few seconds)
+              const avgRate = item.state === 'importing' && elapsedSec >= 3 && item.size > 0
+                ? item.size / elapsedSec
+                : null
 
-                {/* titles */}
-                <div className="flex-1 min-w-0">
-                  {item.mediaTitle && (
-                    <div className="text-white text-sm font-medium truncate">{item.mediaTitle}</div>
-                  )}
-                  <div className={`truncate ${item.mediaTitle ? 'text-xs text-violet-300/70' : 'text-sm text-white'}`}>
-                    {item.title}
+              return (
+                <div key={key} className="px-4 py-3 space-y-2">
+                  {/* Top row: badge + titles + state pill */}
+                  <div className="flex items-start gap-3">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 mt-0.5 ${
+                      item.service === 'sonarr'
+                        ? 'bg-blue-900/60 text-blue-300'
+                        : 'bg-yellow-900/60 text-yellow-300'
+                    }`}>
+                      {item.service === 'sonarr' ? 'TV' : 'Movie'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      {item.mediaTitle && (
+                        <div className="text-white text-sm font-medium truncate">{item.mediaTitle}</div>
+                      )}
+                      <div className={`truncate ${item.mediaTitle ? 'text-xs text-violet-300/60' : 'text-sm text-white'}`}>
+                        {item.title}
+                      </div>
+                      {item.statusMessages.length > 0 && (
+                        <div className="text-xs text-amber-400 mt-0.5 truncate">{item.statusMessages[0]}</div>
+                      )}
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 font-medium ${
+                      item.state === 'importing'
+                        ? 'bg-violet-700/60 text-violet-200'
+                        : 'bg-gray-700/60 text-gray-400'
+                    }`}>
+                      {item.state === 'importing' ? 'Copying…' : 'Pending'}
+                    </span>
                   </div>
-                  {item.statusMessages.length > 0 && (
-                    <div className="text-xs text-amber-400 mt-0.5 truncate">{item.statusMessages[0]}</div>
+
+                  {/* Progress bar */}
+                  <div className="relative h-1.5 rounded-full overflow-hidden bg-gray-800">
+                    {item.state === 'importing' ? (
+                      // Indeterminate shimmer — we don't have byte-level copy progress from Sonarr/Radarr
+                      <div className="absolute inset-0 rounded-full bg-gradient-to-r from-violet-600 via-violet-400 to-violet-600 bg-[length:200%_100%] animate-shimmer" />
+                    ) : (
+                      <div className="h-full w-0 bg-gray-700 rounded-full" />
+                    )}
+                  </div>
+
+                  {/* Bottom row: size · elapsed · avg rate */}
+                  {item.state === 'importing' && (
+                    <div className="flex items-center gap-3 text-xs text-gray-500 tabular-nums">
+                      {item.size > 0 && <span>{formatBytes(item.size)}</span>}
+                      {elapsedSec > 0 && (
+                        <span className="text-violet-400/70">
+                          {elapsedSec < 60
+                            ? `${elapsedSec}s`
+                            : elapsedSec < 3600
+                            ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
+                            : `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`}
+                        </span>
+                      )}
+                      {avgRate !== null && (
+                        <span className="text-green-400/80">≈ {formatSpeed(avgRate)}</span>
+                      )}
+                    </div>
                   )}
                 </div>
-
-                {/* size */}
-                {item.size > 0 && (
-                  <span className="text-xs text-gray-500 tabular-nums shrink-0 hidden sm:block">
-                    {formatBytes(item.size)}
-                  </span>
-                )}
-
-                {/* state pill */}
-                <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 font-medium ${
-                  item.state === 'importing'
-                    ? 'bg-violet-700/60 text-violet-200'
-                    : 'bg-gray-700/60 text-gray-400'
-                }`}>
-                  {item.state === 'importing' ? 'Copying…' : 'Pending'}
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
