@@ -133,7 +133,9 @@ function useAutoDelete(
   enabled: boolean,
   onDelete: (hash: string) => void,
 ) {
-  // Store the previous set of items that were actively importing (not just pending)
+  const onDeleteRef = useRef(onDelete)
+  onDeleteRef.current = onDelete
+
   const prev = useRef<Map<string, string>>(new Map()) // key → downloadId
 
   useEffect(() => {
@@ -141,21 +143,19 @@ function useAutoDelete(
     const currentKeys = new Set(importing.map((i) => `${i.service}-${i.id}`))
 
     if (enabled) {
-      // Items that were in prev (actively importing) but are now gone → import finished
       for (const [key, downloadId] of prev.current) {
         if (!currentKeys.has(key) && downloadId) {
-          onDelete(downloadId)
+          onDeleteRef.current(downloadId)
         }
       }
     }
 
-    // Rebuild prev to only track actively-importing items (not importPending)
     prev.current = new Map(
       importing
         .filter((i) => i.state === 'importing' && i.protocol === 'torrent' && i.downloadId)
         .map((i) => [`${i.service}-${i.id}`, i.downloadId!])
     )
-  }, [importing, enabled, onDelete])
+  }, [importing, enabled]) // onDelete intentionally excluded — accessed via ref
 }
 
 export default function Downloads() {
@@ -185,27 +185,37 @@ export default function Downloads() {
   })
 
   const autoDelete = config?.autoDeleteAfterImport ?? false
+
+  // Use a ref so useAutoDelete and the sweep never go stale on qbitAction's
+  // unstable reference (useMutation returns a new object every render).
+  const qbitMutateRef = useRef(qbitAction.mutate)
+  qbitMutateRef.current = qbitAction.mutate
+
   const handleAutoDelete = useCallback((hash: string) => {
-    qbitAction.mutate({ hash, action: 'delete', deleteFiles: true })
-  }, [qbitAction])
+    qbitMutateRef.current({ hash, action: 'delete', deleteFiles: true })
+  }, []) // stable — reads qbitAction via ref
   useAutoDelete(data?.importing, autoDelete, handleAutoDelete)
 
-  // When the toggle is first turned ON, sweep any seeding qBit torrents that
-  // Sonarr/Radarr is no longer tracking (i.e. already imported).
-  const prevAutoDelete = useRef(autoDelete)
+  // Sweep seeding qBit torrents that Sonarr/Radarr is no longer tracking.
+  // Fires whenever autoDelete is true and data is available.
+  // didSweep resets to false when autoDelete turns off, so re-enabling re-sweeps.
+  const didSweep = useRef(false)
   useEffect(() => {
-    const justEnabled = autoDelete && !prevAutoDelete.current
-    prevAutoDelete.current = autoDelete
-    if (!justEnabled || !data) return
+    if (!autoDelete) {
+      didSweep.current = false   // reset so re-enabling triggers a fresh sweep
+      return
+    }
+    if (!data || didSweep.current) return
+    didSweep.current = true
     const arrHashes = new Set(data.arrQueueHashes ?? [])
     const allQbitItems = [...(data.queue ?? []), ...(data.completed ?? [])]
     const seedingOrphans = allQbitItems.filter(
       (item) => item.client === 'qbittorrent' && item.status === 'seeding' && !arrHashes.has(item.id)
     )
     for (const item of seedingOrphans) {
-      qbitAction.mutate({ hash: item.id, action: 'delete', deleteFiles: true })
+      qbitMutateRef.current({ hash: item.id, action: 'delete', deleteFiles: true })
     }
-  }, [autoDelete, data, qbitAction])
+  }, [autoDelete, data])
 
   const nzbAction = useMutation({
     mutationFn: (body: { id: string; action: string }) =>

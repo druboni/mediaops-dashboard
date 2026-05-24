@@ -224,8 +224,8 @@ export default async function downloadsRoutes(fastify) {
     const [qbitResult, nzbResult, sonarrQueue, radarrQueue] = await Promise.allSettled([
       on('qbittorrent') ? getQbitData(at('qbittorrent').url, at('qbittorrent').key) : Promise.resolve(null),
       on('nzbget') ? getNzbData(at('nzbget').url, at('nzbget').key) : Promise.resolve(null),
-      on('sonarr') ? getArrQueue(at('sonarr').url, at('sonarr').key, 'sonarr') : Promise.resolve([]),
-      on('radarr') ? getArrQueue(at('radarr').url, at('radarr').key, 'radarr') : Promise.resolve([]),
+      on('sonarr') ? getArrQueue(at('sonarr').url, at('sonarr').key, 'sonarr') : Promise.resolve({ importing: [], allHashes: new Set() }),
+      on('radarr') ? getArrQueue(at('radarr').url, at('radarr').key, 'radarr') : Promise.resolve({ importing: [], allHashes: new Set() }),
     ])
 
     const qbit = qbitResult.status === 'fulfilled' ? qbitResult.value : null
