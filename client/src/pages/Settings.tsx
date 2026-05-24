@@ -54,6 +54,7 @@ export default function Settings() {
   const [showKey, setShowKey] = useState<Partial<Record<ServiceName, boolean>>>({})
   const [links, setLinks] = useState<QuickLink[]>([])
   const [newLink, setNewLink] = useState<{ label: string; url: string }>({ label: '', url: '' })
+  const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -65,6 +66,8 @@ export default function Settings() {
   useEffect(() => {
     if (config?.services) setServices(config.services)
     if (config?.links) setLinks(config.links)
+    if (typeof config?.autoDeleteAfterImport === 'boolean')
+      setAutoDeleteAfterImport(config.autoDeleteAfterImport)
   }, [config])
 
   const updateService = (name: ServiceName, field: keyof ServiceConfig, value: string | boolean) => {
@@ -93,7 +96,7 @@ export default function Settings() {
     setSaving(true)
     setSaved(false)
     try {
-      await updateConfig({ ...config!, services, links })
+      await updateConfig({ ...config!, services, links, autoDeleteAfterImport })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } finally {
@@ -208,6 +211,25 @@ export default function Settings() {
           </section>
         ))}
       </div>
+
+      {/* Downloads */}
+      <section className="mt-10 pt-8 border-t border-gray-800">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Downloads</h2>
+        <p className="text-xs text-gray-600 mb-4">Behaviour after a download is imported into the library</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-white font-medium mb-0.5">Auto-remove from qBittorrent after import</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              When Sonarr or Radarr finishes importing a torrent, automatically delete it from qBittorrent
+              along with its source files. Safe with all import modes — hard-links preserve the library
+              copy, and copies/moves leave the file in place.
+            </p>
+          </div>
+          <div className="shrink-0 mt-0.5">
+            <Toggle enabled={autoDeleteAfterImport} onChange={setAutoDeleteAfterImport} />
+          </div>
+        </div>
+      </section>
 
       {/* Quick Links */}
       <section className="mt-10 pt-8 border-t border-gray-800">

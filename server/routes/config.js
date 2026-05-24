@@ -8,6 +8,7 @@ const CONFIG_PATH = process.env.CONFIG_PATH || join(__dirname, '../../config/con
 
 const DEFAULT_CONFIG = {
   links: [],
+  autoDeleteAfterImport: false,
   services: {
     plex:        { enabled: false, url: '', apiKey: '' },
     sonarr:      { enabled: false, url: '', apiKey: '' },
@@ -57,6 +58,8 @@ export default async function configRoutes(fastify) {
     const current = await getConfig()
     const updated = { ...current, services: request.body.services }
     if (Array.isArray(request.body.links)) updated.links = request.body.links
+    if (typeof request.body.autoDeleteAfterImport === 'boolean')
+      updated.autoDeleteAfterImport = request.body.autoDeleteAfterImport
     await saveConfig(updated)
     return updated
   })

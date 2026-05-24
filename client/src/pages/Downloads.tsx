@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
@@ -26,6 +26,7 @@ interface ImportingItem {
   title: string
   state: 'importPending' | 'importing'
   downloadClient: string | null
+  downloadId: string | null   // qBittorrent torrent hash
   protocol: 'torrent' | 'usenet' | null
   size: number
   statusMessages: string[]
@@ -124,8 +125,40 @@ function useImportingTimestamps(importing: ImportingItem[] | undefined) {
   return (key: string) => startTimes.current.get(key) ?? null
 }
 
+// When autoDeleteAfterImport is enabled, fire a qBit delete when an item
+// disappears from the 'importing' list (= Sonarr/Radarr completed the import).
+function useAutoDelete(
+  importing: ImportingItem[] | undefined,
+  enabled: boolean,
+  onDelete: (hash: string) => void,
+) {
+  // Store the previous set of items that were actively importing (not just pending)
+  const prev = useRef<Map<string, string>>(new Map()) // key → downloadId
+
+  useEffect(() => {
+    if (!importing) return
+    const currentKeys = new Set(importing.map((i) => `${i.service}-${i.id}`))
+
+    if (enabled) {
+      // Items that were in prev (actively importing) but are now gone → import finished
+      for (const [key, downloadId] of prev.current) {
+        if (!currentKeys.has(key) && downloadId) {
+          onDelete(downloadId)
+        }
+      }
+    }
+
+    // Rebuild prev to only track actively-importing items (not importPending)
+    prev.current = new Map(
+      importing
+        .filter((i) => i.state === 'importing' && i.protocol === 'torrent' && i.downloadId)
+        .map((i) => [`${i.service}-${i.id}`, i.downloadId!])
+    )
+  }, [importing, enabled, onDelete])
+}
+
 export default function Downloads() {
-  const { enabledServices } = useConfig()
+  const { enabledServices, config } = useConfig()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<'queue' | 'completed'>('queue')
   const [clientFilter, setClientFilter] = useState<'all' | 'qbittorrent' | 'nzbget'>('all')
@@ -143,6 +176,12 @@ export default function Downloads() {
   })
 
   const getImportStart = useImportingTimestamps(data?.importing)
+
+  const autoDelete = config?.autoDeleteAfterImport ?? false
+  const handleAutoDelete = useCallback((hash: string) => {
+    qbitAction.mutate({ hash, action: 'delete', deleteFiles: true })
+  }, [qbitAction])
+  useAutoDelete(data?.importing, autoDelete, handleAutoDelete)
 
   const qbitAction = useMutation({
     mutationFn: (body: { hash: string; action: string; deleteFiles?: boolean }) =>
@@ -268,9 +307,16 @@ export default function Downloads() {
             <span className="text-xs font-semibold text-violet-300 uppercase tracking-wide">
               Importing to Library
             </span>
-            <span className="ml-auto text-xs text-violet-500">
-              {data.importing.length} item{data.importing.length !== 1 ? 's' : ''}
-            </span>
+            <div className="ml-auto flex items-center gap-3">
+              {autoDelete && (
+                <span className="text-xs text-orange-400/80" title="Auto-remove from qBittorrent after import is enabled">
+                  ⚡ auto-remove on
+                </span>
+              )}
+              <span className="text-xs text-violet-500">
+                {data.importing.length} item{data.importing.length !== 1 ? 's' : ''}
+              </span>
+            </div>
           </div>
           <div className="divide-y divide-violet-800/20">
             {data.importing.map((item) => {

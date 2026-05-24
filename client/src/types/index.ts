@@ -28,4 +28,5 @@ export interface Config {
   services: Record<ServiceName, ServiceConfig>
   links?: QuickLink[]
   adminPasswordHash?: string
+  autoDeleteAfterImport?: boolean
 }

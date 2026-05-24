@@ -131,6 +131,7 @@ async function getArrQueue(url, apiKey, service) {
           title,
           state: r.trackedDownloadState,   // 'importPending' | 'importing'
           downloadClient: r.downloadClient || null,
+          downloadId: r.downloadId || null, // torrent hash for qBittorrent
           protocol: r.protocol || null,    // 'torrent' | 'usenet'
           size: r.size || 0,
           statusMessages: (r.statusMessages || []).flatMap((s) => s.messages || []),
