@@ -13,19 +13,27 @@ async function safeFetch(url, timeout = 5000) {
 }
 
 
-async function getGlances(host, port = 61208) {
+// GPU-relevant process name fragments — these get a highlighted badge in the UI
+const GPU_PROCESS_NAMES = ['plex transcode', 'ffmpeg', 'transcode', 'nvenc', 'cuda', 'plex media server']
+
+async function getGlances(host, port = 61208, includeProcesses = false) {
   const base = `http://${host}:${port}/api/3`
-  const [cpu, mem, fs, net] = await Promise.allSettled([
+  const fetches = [
     safeFetch(`${base}/cpu`),
     safeFetch(`${base}/mem`),
     safeFetch(`${base}/fs`),
     safeFetch(`${base}/network`),
-  ])
+  ]
+  if (includeProcesses) fetches.push(safeFetch(`${base}/processlist`))
 
-  const cpuVal  = cpu.status  === 'fulfilled' && cpu.value.ok  ? cpu.value.data   : null
-  const memVal  = mem.status  === 'fulfilled' && mem.value.ok  ? mem.value.data   : null
-  const fsVal   = fs.status   === 'fulfilled' && fs.value.ok   ? fs.value.data    : []
-  const netVal  = net.status  === 'fulfilled' && net.value.ok  ? net.value.data   : []
+  const [cpu, mem, fs, net, procs] = await Promise.allSettled(fetches)
+
+  const cpuVal   = cpu.status   === 'fulfilled' && cpu.value.ok   ? cpu.value.data   : null
+  const memVal   = mem.status   === 'fulfilled' && mem.value.ok   ? mem.value.data   : null
+  const fsVal    = fs.status    === 'fulfilled' && fs.value.ok    ? fs.value.data    : []
+  const netVal   = net.status   === 'fulfilled' && net.value.ok   ? net.value.data   : []
+  const procsVal = includeProcesses && procs && procs.status === 'fulfilled' && procs.value.ok
+    ? procs.value.data : []
 
   const SKIP_FS = ['tmpfs', 'devtmpfs', 'overlay', 'squashfs', 'nsfs']
   const disks = Array.isArray(fsVal)
@@ -49,11 +57,27 @@ async function getGlances(host, port = 61208) {
         .map(n => ({ iface: n.interface_name, rx: n.rx, tx: n.tx, rxTotal: n.cumulative_rx, txTotal: n.cumulative_tx }))
     : []
 
+  // Build process list — sort by CPU desc, take top 8, tag GPU-likely ones
+  const processList = Array.isArray(procsVal)
+    ? procsVal
+        .filter((p) => (p.cpu_percent ?? 0) > 0.1 || GPU_PROCESS_NAMES.some((n) => (p.name ?? '').toLowerCase().includes(n)))
+        .sort((a, b) => (b.cpu_percent ?? 0) - (a.cpu_percent ?? 0))
+        .slice(0, 8)
+        .map((p) => ({
+          pid:        p.pid,
+          name:       p.name ?? 'unknown',
+          cpu:        Math.round((p.cpu_percent ?? 0) * 10) / 10,
+          memMb:      Math.round((p.memory_info?.[0] ?? 0) / 1_048_576),
+          gpuRelated: GPU_PROCESS_NAMES.some((n) => (p.name ?? '').toLowerCase().includes(n)),
+        }))
+    : []
+
   return {
     cpu:     cpuVal ? { percent: Math.round(cpuVal.total), cores: cpuVal.cpucore, user: Math.round(cpuVal.user), system: Math.round(cpuVal.system) } : null,
     mem:     memVal ? { percent: Math.round(memVal.percent), used: memVal.used, total: memVal.total, free: memVal.free } : null,
     disks,
     network,
+    processList,
   }
 }
 
@@ -126,23 +150,29 @@ export default async function systemRoutes(fastify) {
     const arrHost  = arrUrl  ? new URL(arrUrl).hostname  : null
 
     const [plexGlances, arrGlances, gpu, containers] = await Promise.allSettled([
-      plexHost ? getGlances(plexHost) : null,
+      plexHost ? getGlances(plexHost, 61208, true) : null,  // include processes for GPU host
       arrHost  ? getGlances(arrHost)  : null,
       plexHost ? getGpu(plexHost)     : null,
       getDockerContainers(),
     ])
 
+    const plexStats = plexGlances.status === 'fulfilled' && plexGlances.value
+      ? plexGlances.value
+      : { cpu: null, mem: null, disks: [], network: [], processList: [] }
+
     return {
       plexgpu: {
         label: 'Media Server (plexgpu)',
         host: plexHost,
-        ...(plexGlances.status === 'fulfilled' ? plexGlances.value : { cpu: null, mem: null, disks: [], network: [] }),
+        ...plexStats,
         gpu: gpu.status === 'fulfilled' ? gpu.value : null,
       },
       arr: {
         label: 'Arr Server',
         host: arrHost,
-        ...(arrGlances.status === 'fulfilled' ? arrGlances.value : { cpu: null, mem: null, disks: [], network: [] }),
+        ...(arrGlances.status === 'fulfilled' && arrGlances.value
+          ? arrGlances.value
+          : { cpu: null, mem: null, disks: [], network: [], processList: [] }),
         gpu: null,
       },
       containers: containers.status === 'fulfilled' ? containers.value : null,

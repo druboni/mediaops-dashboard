@@ -43,6 +43,14 @@ interface GpuInfo {
   power_limit: number
 }
 
+interface ProcessInfo {
+  pid: number
+  name: string
+  cpu: number
+  memMb: number
+  gpuRelated: boolean
+}
+
 interface ServerStats {
   label: string
   host: string | null
@@ -51,6 +59,7 @@ interface ServerStats {
   disks: DiskInfo[]
   network: NetInfo[]
   gpu: GpuInfo | null
+  processList: ProcessInfo[]
 }
 
 interface ContainerInfo {
@@ -97,6 +106,20 @@ function GaugeBar({ percent, color = 'blue' }: { percent: number; color?: string
       <div className={`h-1.5 rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
     </div>
   )
+}
+
+function GpuProcessBadge({ name }: { name: string }) {
+  const lower = name.toLowerCase()
+  if (lower.includes('plex transcode') || lower.includes('plex media')) {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-300 font-medium shrink-0">Plex</span>
+  }
+  if (lower.includes('ffmpeg')) {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-300 font-medium shrink-0">ffmpeg</span>
+  }
+  if (lower.includes('transcode') || lower.includes('nvenc') || lower.includes('cuda')) {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/50 text-violet-300 font-medium shrink-0">GPU</span>
+  }
+  return null
 }
 
 function ServerCard({ server }: { server: ServerStats }) {
@@ -168,6 +191,27 @@ function ServerCard({ server }: { server: ServerStats }) {
               <span>🌡 {server.gpu.temp.toFixed(0)}°C</span>
               <span>⚡ {server.gpu.power_draw.toFixed(0)}W / {server.gpu.power_limit.toFixed(0)}W</span>
             </div>
+
+            {/* GPU process list */}
+            {server.processList?.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-800">
+                <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                  Active Processes
+                </p>
+                <div className="space-y-1">
+                  {server.processList.map((p) => (
+                    <div key={p.pid} className="flex items-center gap-2 text-xs">
+                      <GpuProcessBadge name={p.name} />
+                      <span className={`flex-1 truncate font-mono text-[11px] ${p.gpuRelated ? 'text-white' : 'text-gray-400'}`}>
+                        {p.name}
+                      </span>
+                      <span className="tabular-nums text-gray-500 shrink-0">{p.cpu.toFixed(1)}%</span>
+                      <span className="tabular-nums text-gray-600 shrink-0 hidden sm:block">{p.memMb} MB</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
