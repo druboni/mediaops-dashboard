@@ -124,4 +124,50 @@ export default async function plexRoutes(fastify) {
       items,
     }
   })
+
+  // Get children of a Plex item: seasons of a show, or episodes of a season
+  fastify.get('/children/:ratingKey', async (request, reply) => {
+    const config = await getConfig()
+    const svc = config.services.plex
+    if (!svc?.enabled) return reply.status(400).send({ error: 'Plex not enabled' })
+
+    const { ratingKey } = request.params
+    const base = svc.url.replace(/\/$/, '')
+    const res = await plexFetch(`${base}/library/metadata/${ratingKey}/children`, svc.apiKey)
+    if (!res.ok) return reply.status(502).send({ error: res.error })
+
+    const mc = res.data?.MediaContainer ?? {}
+    const viewGroup = mc.viewGroup  // 'season' | 'episode'
+    const rawItems = mc.Metadata ?? []
+
+    const items = rawItems.map((m) =>
+      viewGroup === 'season'
+        ? {
+            ratingKey: m.ratingKey,
+            title: m.title,
+            index: m.index ?? 0,
+            leafCount: m.leafCount ?? 0,
+            viewedLeafCount: m.viewedLeafCount ?? 0,
+            thumb: m.thumb ? `/api/plex/thumb?path=${encodeURIComponent(m.thumb)}` : null,
+          }
+        : {
+            ratingKey: m.ratingKey,
+            title: m.title,
+            index: m.index ?? 0,            // episode number
+            parentIndex: m.parentIndex ?? 0, // season number
+            thumb: m.thumb ? `/api/plex/thumb?path=${encodeURIComponent(m.thumb)}` : null,
+            duration: m.duration ?? null,
+            summary: m.summary ?? null,
+            airDate: m.originallyAvailableAt ?? null,
+            viewCount: m.viewCount ?? 0,
+            rating: m.audienceRating ?? null,
+          }
+    )
+
+    return {
+      type: viewGroup,
+      parentTitle: mc.parentTitle ?? mc.title ?? null,
+      items,
+    }
+  })
 }
