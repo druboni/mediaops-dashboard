@@ -198,7 +198,8 @@ export default function Downloads() {
     prevAutoDelete.current = autoDelete
     if (!justEnabled || !data) return
     const arrHashes = new Set(data.arrQueueHashes ?? [])
-    const seedingOrphans = data.queue.filter(
+    const allQbitItems = [...(data.queue ?? []), ...(data.completed ?? [])]
+    const seedingOrphans = allQbitItems.filter(
       (item) => item.client === 'qbittorrent' && item.status === 'seeding' && !arrHashes.has(item.id)
     )
     for (const item of seedingOrphans) {
