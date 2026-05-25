@@ -5,6 +5,36 @@ import { useConfig } from '../store/config'
 import api from '../services/api'
 import type { ServiceName } from '../types'
 
+interface QueueItem {
+  id: string
+  client: 'qbittorrent' | 'nzbget'
+  name: string
+  category: string
+  size: number
+  downloaded: number
+  progress: number
+  dlSpeed: number
+  upSpeed: number
+  eta: number
+  status: string
+}
+
+interface ImportingItem {
+  id: string
+  service: string
+  mediaTitle: string | null
+  title: string
+  state: string
+  size: number
+}
+
+interface DownloadsData {
+  queue: QueueItem[]
+  completed: QueueItem[]
+  importing: ImportingItem[]
+  arrQueueHashes: string[]
+}
+
 interface HealthEntry { ok: boolean; version?: string; error?: string }
 interface HealthAlert { service: string; level: 'warning' | 'error'; source: string; message: string }
 interface IndexerStatus { indexerId: number; mostRecentFailure: string; initialFailure: string; disabledTill: string }
@@ -57,6 +87,13 @@ function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec >= 1024) return `${Math.round(bytesPerSec / 1024)} KB/s`
   if (bytesPerSec > 0) return `${bytesPerSec} B/s`
   return '0'
+}
+
+function formatEta(seconds: number): string {
+  if (seconds < 0 || seconds > 86400 * 7) return '∞'
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
 function timeAgo(dateStr: string): string {
@@ -141,6 +178,13 @@ export default function Dashboard() {
       return res.data
     },
     refetchInterval: 10_000,
+    enabled: enabledServices.length > 0,
+  })
+
+  const { data: downloadsData } = useQuery<DownloadsData>({
+    queryKey: ['downloads'],
+    queryFn: async () => (await api.get<DownloadsData>('/downloads')).data,
+    refetchInterval: 5_000,
     enabled: enabledServices.length > 0,
   })
 
@@ -264,6 +308,93 @@ export default function Dashboard() {
           <StatCard label="Requests" value={data.stats.pendingRequests} highlight={!!data.stats.pendingRequests} />
         </div>
       </section>
+
+      {/* Active Download Queue — full width above the 2-col grid */}
+      {(() => {
+        const activeItems = downloadsData?.queue?.filter(
+          (item) => ['downloading', 'stalled', 'queued', 'checking', 'processing'].includes(item.status)
+        ) ?? []
+        const importingItems = downloadsData?.importing ?? []
+        if (activeItems.length === 0 && importingItems.length === 0) return null
+        return (
+          <section className="mb-8">
+            <h2 className="section-label">Active Downloads</h2>
+            <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+              {activeItems.map((item) => {
+                const pct = Math.round(item.progress * 100)
+                const clientLabel = item.client === 'qbittorrent' ? 'qBit' : 'NZB'
+                const clientColor = item.client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-orange-900/60 text-orange-300'
+                const statusColor =
+                  item.status === 'downloading' ? 'text-green-400' :
+                  item.status === 'stalled'     ? 'text-yellow-400' :
+                  item.status === 'error'       ? 'text-red-400' :
+                                                  'text-gray-500'
+                return (
+                  <div key={item.id} className="px-4 py-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded font-medium ${clientColor}`}>{clientLabel}</span>
+                        <p className="text-sm text-white truncate">{item.name}</p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 text-xs">
+                        <span className={`capitalize ${statusColor}`}>{item.status}</span>
+                        <span className="text-gray-500 tabular-nums">{pct}%</span>
+                      </div>
+                    </div>
+                    <div className="w-full bg-gray-800 rounded-full h-1">
+                      <div
+                        className={`h-1 rounded-full transition-all ${
+                          item.status === 'stalled' ? 'bg-yellow-500' :
+                          item.status === 'error'   ? 'bg-red-500' : 'bg-blue-500'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-600">
+                      <span>{formatSize(item.downloaded)} / {formatSize(item.size)}</span>
+                      <div className="flex gap-3">
+                        {item.dlSpeed > 0 && <span className="text-green-400/80">↓ {formatSpeed(item.dlSpeed)}</span>}
+                        {item.eta > 0 && <span>ETA {formatEta(item.eta)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              {importingItems.map((item) => (
+                <div key={item.id} className="px-4 py-3 space-y-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] shrink-0 px-1.5 py-0.5 rounded font-medium bg-violet-900/60 text-violet-300">
+                        {item.service === 'sonarr' ? 'TV' : 'Movie'}
+                      </span>
+                      <p className="text-sm text-white truncate">
+                        {item.mediaTitle ? `${item.mediaTitle} — ` : ''}{item.title}
+                      </p>
+                    </div>
+                    <span className="text-xs text-violet-400 shrink-0 capitalize">{item.state === 'importPending' ? 'pending' : item.state}</span>
+                  </div>
+                  {/* shimmer bar for active importing, muted for pending */}
+                  {item.state === 'importing' ? (
+                    <div className="w-full bg-gray-800 rounded-full h-1 overflow-hidden">
+                      <div
+                        className="h-1 rounded-full animate-shimmer"
+                        style={{
+                          background: 'linear-gradient(90deg, transparent 0%, #8B5CF6 40%, #A78BFA 50%, #8B5CF6 60%, transparent 100%)',
+                          backgroundSize: '200% 100%',
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full bg-gray-800 rounded-full h-1">
+                      <div className="h-1 rounded-full bg-violet-900/60" style={{ width: '100%' }} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {/* Downloads */}

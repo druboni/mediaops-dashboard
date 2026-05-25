@@ -1,11 +1,16 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 
-export type Theme = 'default' | 'cyberpunk'
+export type Theme = 'default' | 'cyberpunk' | 'nord' | 'dracula' | 'sunset'
 
 export const THEMES: { id: Theme; label: string; accent: string }[] = [
   { id: 'default',   label: 'Default',   accent: '#3b82f6' },
-  { id: 'cyberpunk', label: 'Cyberpunk', accent: '#FCE303' },
+  { id: 'nord',      label: 'Nord',      accent: '#88C0D0' },
+  { id: 'dracula',   label: 'Dracula',   accent: '#BD93F9' },
+  { id: 'sunset',    label: 'Sunset',    accent: '#F59E0B' },
+  { id: 'cyberpunk', label: 'Cyberpunk', accent: '#FF0080' },
 ]
+
+const VALID: Theme[] = ['default', 'cyberpunk', 'nord', 'dracula', 'sunset']
 
 const Ctx = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
   theme: 'default',
@@ -15,7 +20,7 @@ const Ctx = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     const stored = localStorage.getItem('theme')
-    return (stored === 'default' || stored === 'cyberpunk') ? stored : 'default'
+    return VALID.includes(stored as Theme) ? (stored as Theme) : 'default'
   })
 
   const setTheme = (t: Theme) => {
