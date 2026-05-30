@@ -8,6 +8,7 @@ interface DiskInfo {
   total: number
   free: number
   percent: number
+  pool?: boolean
 }
 
 interface NetInfo {
@@ -222,9 +223,15 @@ function ServerCard({ server }: { server: ServerStats }) {
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Storage</h3>
           <div className="space-y-3">
             {server.disks.map((disk, i) => (
-              <div key={i}>
+              <div key={i} className={disk.pool ? 'pb-3 mb-0.5 border-b border-gray-800' : ''}>
                 <div className="flex justify-between text-xs mb-0.5">
-                  <span className="text-gray-400">{disk.label} <span className="text-gray-700">({disk.mount})</span></span>
+                  <span className={disk.pool ? 'text-gray-300 font-medium' : 'text-gray-400'}>
+                    {disk.label}
+                    {disk.pool
+                      ? <span className="ml-1.5 text-[10px] text-gray-600 font-normal">mergerfs</span>
+                      : <span className="text-gray-700"> ({disk.mount})</span>
+                    }
+                  </span>
                   <span className={`font-medium ${disk.percent >= 90 ? 'text-red-400' : disk.percent >= 70 ? 'text-yellow-400' : 'text-gray-400'}`}>
                     {disk.percent}%
                   </span>

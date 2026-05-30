@@ -49,6 +49,22 @@ async function getGlances(host, port = 61208, includeProcesses = false) {
         }))
     : []
 
+  // Glances doesn't surface the mergerfs /mnt/plex union mount, so synthesise it
+  // by summing the underlying drives (mounted at /etc/plexmediaN).
+  const plexDrives = disks.filter(d => d.mount.startsWith('/etc/plexmedia'))
+  if (plexDrives.length > 0) {
+    const total   = plexDrives.reduce((s, d) => s + d.total, 0)
+    const used    = plexDrives.reduce((s, d) => s + d.used,  0)
+    const free    = plexDrives.reduce((s, d) => s + d.free,  0)
+    disks.unshift({
+      mount:   '/mnt/plex',
+      label:   'Plex Pool',
+      used, total, free,
+      percent: Math.round((used / total) * 100),
+      pool:    true,
+    })
+  }
+
   const SKIP_NET = ['lo', 'docker0', 'virbr0', 'br-']
   const network = Array.isArray(netVal)
     ? netVal
