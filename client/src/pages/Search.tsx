@@ -32,7 +32,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'requests', label: 'Overseerr' },
 ]
 
-type ReqState = 'idle' | 'picking' | 'loading' | 'done' | 'error'
+type ReqState = 'idle' | 'loading' | 'done' | 'error'
 
 // Overseerr status strings that mean "already handled"
 const SEERR_ACTIVE_STATUSES = new Set([
@@ -174,8 +174,6 @@ export default function Search() {
                 reqKey={`movies-${i}`}
                 reqState={reqState[`movies-${i}`] ?? 'idle'}
                 reqErr={reqError[`movies-${i}`] ?? ''}
-                onPickQuality={() => setItem(`movies-${i}`, 'picking')}
-                onCancelPick={() => setItem(`movies-${i}`, 'idle')}
                 onRequest={(is4k) => {
                   const tid = m.tmdbId ?? (typeof m.id === 'number' ? m.id : null)
                   if (tid) submitRequest(`movies-${i}`, tid, 'movie', is4k)
@@ -192,8 +190,6 @@ export default function Search() {
                 reqKey={`shows-${i}`}
                 reqState={reqState[`shows-${i}`] ?? 'idle'}
                 reqErr={reqError[`shows-${i}`] ?? ''}
-                onPickQuality={() => setItem(`shows-${i}`, 'picking')}
-                onCancelPick={() => setItem(`shows-${i}`, 'idle')}
                 onRequest={(is4k) => {
                   if (s.tmdbId) submitRequest(`shows-${i}`, s.tmdbId, 'tv', is4k)
                 }}
@@ -201,7 +197,7 @@ export default function Search() {
             ))}
             {activeTab === 'artists' && results.artists.map((a, i) => (
               <ResultRow key={i} item={a} type="artist" mediaType={null} tmdbId={null}
-                reqKey={`artists-${i}`} reqState="idle" reqErr="" onPickQuality={() => {}} onCancelPick={() => {}} onRequest={() => {}} />
+                reqKey={`artists-${i}`} reqState="idle" reqErr="" onRequest={() => {}} />
             ))}
             {activeTab === 'requests' && results.requests.map((r, i) => (
               <ResultRow
@@ -213,8 +209,6 @@ export default function Search() {
                 reqKey={`requests-${i}`}
                 reqState={reqState[`requests-${i}`] ?? 'idle'}
                 reqErr={reqError[`requests-${i}`] ?? ''}
-                onPickQuality={() => setItem(`requests-${i}`, 'picking')}
-                onCancelPick={() => setItem(`requests-${i}`, 'idle')}
                 onRequest={(is4k) => {
                   const tid = typeof r.id === 'number' ? r.id : null
                   const mt = r.type === 'movie' ? 'movie' : r.type === 'tv' ? 'tv' : null
@@ -244,12 +238,10 @@ interface ResultRowProps {
   reqKey: string
   reqState: ReqState
   reqErr: string
-  onPickQuality: () => void
-  onCancelPick: () => void
   onRequest: (is4k: boolean) => void
 }
 
-function ResultRow({ item, type, mediaType, tmdbId, reqState, reqErr, onPickQuality, onCancelPick, onRequest }: ResultRowProps) {
+function ResultRow({ item, type, mediaType, tmdbId, reqState, reqErr, onRequest }: ResultRowProps) {
   // For Overseerr tab: 'available' / 'partially_available' means it's in Plex
   const serrAvailable = item.status === 'available' || item.status === 'partially_available'
   const inPlex = item.inPlex || serrAvailable
@@ -330,42 +322,25 @@ function ResultRow({ item, type, mediaType, tmdbId, reqState, reqErr, onPickQual
           {canRequest && (
             <div className="shrink-0 flex items-center gap-1.5 mt-0.5">
               {reqState === 'idle' && (
-                <button
-                  onClick={onPickQuality}
-                  className="text-xs px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 transition-colors"
-                >
-                  Request
-                </button>
-              )}
-
-              {reqState === 'picking' && (
                 <>
-                  <span className="text-xs text-gray-500 mr-1">Quality:</span>
                   <button
                     onClick={() => onRequest(false)}
                     className="text-xs px-2.5 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
                   >
-                    1080p
+                    Request
                   </button>
                   <button
                     onClick={() => onRequest(true)}
-                    className="text-xs px-2.5 py-1 rounded bg-purple-700 hover:bg-purple-600 text-white transition-colors"
+                    className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-purple-800 text-gray-400 hover:text-purple-300 border border-gray-700 hover:border-purple-700 transition-colors"
+                    title="Request in 4K"
                   >
                     4K
                   </button>
-                  <button
-                    onClick={onCancelPick}
-                    className="text-xs px-1.5 py-1 rounded text-gray-600 hover:text-gray-400 transition-colors"
-                  >
-                    ✕
-                  </button>
                 </>
               )}
-
               {reqState === 'loading' && (
                 <span className="text-xs text-gray-500 animate-pulse">Requesting…</span>
               )}
-
               {reqState === 'done' && (
                 <span className="text-xs text-green-400">✓ Requested</span>
               )}
