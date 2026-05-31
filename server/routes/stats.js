@@ -22,15 +22,17 @@ export default async function statsRoutes(fastify) {
     const base = `${svc.url.replace(/\/$/, '')}/api/v2?apikey=${encodeURIComponent(svc.apiKey)}`
     const range = parseInt(request.query.range) || 30
 
-    const [homeStats, playsByDate, users] = await Promise.allSettled([
+    const [homeStats, weekStats, monthStats, playsByDate, users] = await Promise.allSettled([
       safeFetch(`${base}&cmd=get_home_stats&time_range=${range}&stats_count=10`),
+      safeFetch(`${base}&cmd=get_home_stats&time_range=7&stats_count=5`),
+      safeFetch(`${base}&cmd=get_home_stats&time_range=30&stats_count=5`),
       safeFetch(`${base}&cmd=get_plays_by_date&time_range=${range}`),
       safeFetch(`${base}&cmd=get_users_table&length=10&order_column=last_seen&order_dir=desc`),
     ])
 
-    const homeData = homeStats.status === 'fulfilled' && homeStats.value.ok
-      ? homeStats.value.data?.response?.data ?? []
-      : []
+    const homeData  = homeStats.status  === 'fulfilled' && homeStats.value.ok  ? homeStats.value.data?.response?.data  ?? [] : []
+    const weekData  = weekStats.status  === 'fulfilled' && weekStats.value.ok  ? weekStats.value.data?.response?.data  ?? [] : []
+    const monthData = monthStats.status === 'fulfilled' && monthStats.value.ok ? monthStats.value.data?.response?.data ?? [] : []
 
     const playsData = playsByDate.status === 'fulfilled' && playsByDate.value.ok
       ? playsByDate.value.data?.response?.data ?? null
@@ -47,9 +49,7 @@ export default async function statsRoutes(fastify) {
         }))
       : []
 
-    // Parse home stats into structured sections
-    const findStat = (id) => homeData.find((s) => s.stat_id === id)
-
+    const findStat   = (data, id) => data.find((s) => s.stat_id === id)
     const mapStatRows = (stat) =>
       (stat?.rows ?? []).map((r) => ({
         title: r.title || r.grandparent_title || r.full_title || '—',
@@ -60,28 +60,54 @@ export default async function statsRoutes(fastify) {
         mediaType: r.media_type || null,
       }))
 
+    // Compute highlight (most watched content + top user) for a given time window
+    const extractHighlight = (data) => {
+      const movieRow = findStat(data, 'top_movies')?.rows?.[0]
+      const tvRow    = findStat(data, 'top_tv')?.rows?.[0]
+      const userRow  = findStat(data, 'top_users')?.rows?.[0]
+
+      let topContent = null
+      const mPlays = movieRow?.total_plays ?? 0
+      const tPlays = tvRow?.total_plays    ?? 0
+      if (movieRow || tvRow) {
+        const r = (mPlays >= tPlays && movieRow) ? movieRow : (tvRow ?? movieRow)
+        topContent = {
+          title: r.title || r.grandparent_title || r.full_title || '—',
+          year:  r.year || null,
+          type:  (mPlays >= tPlays && movieRow) ? 'movie' : 'tv',
+          plays: Math.max(mPlays, tPlays),
+        }
+      }
+
+      const topUser = userRow ? {
+        name:     userRow.friendly_name || userRow.username || 'Unknown',
+        plays:    userRow.total_plays    ?? 0,
+        duration: userRow.total_duration ?? 0,
+      } : null
+
+      return { topContent, topUser }
+    }
+
     // Build plays-by-date chart data
-    let chartDates = []
-    let chartMovies = []
-    let chartShows = []
-    let chartMusic = []
+    let chartDates = [], chartMovies = [], chartShows = [], chartMusic = []
     if (playsData) {
-      chartDates = playsData.categories ?? []
+      chartDates  = playsData.categories ?? []
       const series = playsData.series ?? []
       chartMovies = series.find((s) => s.name === 'Movies')?.data ?? Array(chartDates.length).fill(0)
-      chartShows  = series.find((s) => s.name === 'TV')?.data    ?? Array(chartDates.length).fill(0)
-      chartMusic  = series.find((s) => s.name === 'Music')?.data ?? Array(chartDates.length).fill(0)
+      chartShows  = series.find((s) => s.name === 'TV')?.data     ?? Array(chartDates.length).fill(0)
+      chartMusic  = series.find((s) => s.name === 'Music')?.data  ?? Array(chartDates.length).fill(0)
     }
 
     return {
       available: true,
       range,
-      topMovies:    mapStatRows(findStat('top_movies')),
-      topShows:     mapStatRows(findStat('top_tv')),
-      topMusic:     mapStatRows(findStat('top_music')),
-      popularMovies: mapStatRows(findStat('popular_movies')),
-      popularShows:  mapStatRows(findStat('popular_tv')),
-      recentUsers:  usersData,
+      highlights: { week: extractHighlight(weekData), month: extractHighlight(monthData) },
+      topMovies:     mapStatRows(findStat(homeData, 'top_movies')),
+      topShows:      mapStatRows(findStat(homeData, 'top_tv')),
+      topMusic:      mapStatRows(findStat(homeData, 'top_music')),
+      popularMovies: mapStatRows(findStat(homeData, 'popular_movies')),
+      popularShows:  mapStatRows(findStat(homeData, 'popular_tv')),
+      recentUsers:   usersData,
       chart: { dates: chartDates, movies: chartMovies, shows: chartShows, music: chartMusic },
     }
   })

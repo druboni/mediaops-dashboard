@@ -28,9 +28,15 @@ interface ChartData {
   music: number[]
 }
 
+interface Highlight {
+  topContent: { title: string; year: number | null; type: string; plays: number } | null
+  topUser:    { name: string; plays: number; duration: number } | null
+}
+
 interface StatsData {
   available: boolean
   range: number
+  highlights: { week: Highlight; month: Highlight }
   topMovies: StatRow[]
   topShows: StatRow[]
   topMusic: StatRow[]
@@ -56,6 +62,60 @@ function timeAgo(dateStr: string | null): string {
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
   return `${Math.floor(hrs / 24)}d ago`
+}
+
+function HighlightsCard({ highlights }: { highlights: { week: Highlight; month: Highlight } }) {
+  const cols: { label: string; data: Highlight }[] = [
+    { label: 'This Week',  data: highlights.week  },
+    { label: 'This Month', data: highlights.month },
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {cols.map(({ label, data }) => (
+        <div key={label} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">{label}</h3>
+          <div className="space-y-3">
+            {/* Most watched content */}
+            <div>
+              <p className="text-[10px] text-gray-600 uppercase tracking-wide mb-1">Most Watched</p>
+              {data.topContent ? (
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                    data.topContent.type === 'movie' ? 'bg-blue-900/60 text-blue-300' : 'bg-green-900/60 text-green-300'
+                  }`}>
+                    {data.topContent.type === 'movie' ? 'Movie' : 'TV'}
+                  </span>
+                  <span className="text-sm text-white font-medium truncate">{data.topContent.title}</span>
+                  {data.topContent.year && <span className="text-xs text-gray-600 shrink-0">{data.topContent.year}</span>}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-600">No data</p>
+              )}
+              {data.topContent && (
+                <p className="text-xs text-gray-500 mt-0.5 ml-0.5">{data.topContent.plays} play{data.topContent.plays !== 1 ? 's' : ''}</p>
+              )}
+            </div>
+
+            {/* Top viewer */}
+            <div className="pt-2 border-t border-gray-800">
+              <p className="text-[10px] text-gray-600 uppercase tracking-wide mb-1">Top Viewer</p>
+              {data.topUser ? (
+                <>
+                  <p className="text-sm text-white font-medium">{data.topUser.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {data.topUser.plays} play{data.topUser.plays !== 1 ? 's' : ''}
+                    {data.topUser.duration > 0 && ` · ${formatDuration(data.topUser.duration)}`}
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-gray-600">No data</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function MiniBar({ value, max }: { value: number; max: number }) {
@@ -220,6 +280,9 @@ export default function Stats() {
         </div>
       ) : data ? (
         <div className="space-y-6">
+          {/* Week / Month highlights */}
+          <HighlightsCard highlights={data.highlights} />
+
           {/* Play chart */}
           <PlayChart chart={data.chart} range={range} />
 
