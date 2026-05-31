@@ -3,6 +3,8 @@ import { useConfig } from '../store/config'
 import { useAuth } from '../store/auth'
 import type { ServiceName, QuickLink } from '../types'
 
+declare const __APP_VERSION__: string
+
 interface NavItem {
   label: string
   path: string
@@ -87,7 +89,10 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       `}
     >
       <div className="px-4 py-5 border-b border-gray-800">
-        <span className="text-white font-bold text-lg tracking-tight">MediaOps</span>
+        <div className="flex items-baseline gap-2">
+          <span className="text-white font-bold text-lg tracking-tight">MediaOps</span>
+          <span className="text-gray-700 text-xs tabular-nums">v{__APP_VERSION__}</span>
+        </div>
         <p className="text-gray-600 text-xs mt-0.5">developed by Brian</p>
       </div>
 
