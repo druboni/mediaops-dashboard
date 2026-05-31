@@ -122,7 +122,7 @@ function MiniBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 bg-gray-800 rounded-full h-1">
+      <div className="flex-1 bg-gray-800 rounded-full h-1 overflow-hidden">
         <div className="bg-blue-500 h-1 rounded-full" style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs tabular-nums text-gray-400 w-8 text-right">{value}</span>
@@ -131,7 +131,9 @@ function MiniBar({ value, max }: { value: number; max: number }) {
 }
 
 function StatList({ title, items, accent }: { title: string; items: StatRow[]; accent: string }) {
-  const max = items[0]?.plays ?? 1
+  // Use the actual maximum across all rows — Tautulli popular lists are sorted by
+  // user-count not play-count, so items[0].plays isn't always the highest.
+  const max = Math.max(...items.map(i => i.plays), 1)
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">{title}</h3>
@@ -146,7 +148,7 @@ function StatList({ title, items, accent }: { title: string; items: StatRow[]; a
                 {item.year && <span className="text-xs text-gray-600 shrink-0">{item.year}</span>}
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex-1 bg-gray-800 rounded-full h-1">
+                <div className="flex-1 bg-gray-800 rounded-full h-1 overflow-hidden">
                   <div className={`h-1 rounded-full ${accent}`} style={{ width: `${Math.round((item.plays / max) * 100)}%` }} />
                 </div>
                 <span className="text-xs tabular-nums text-gray-400 w-12 text-right">
@@ -184,15 +186,17 @@ function PlayChart({ chart, range }: { chart: ChartData; range: number }) {
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Plays Over Time</h3>
         <span className="text-xs text-gray-600">{totalPlays} total plays</span>
       </div>
+      {/* Pixel heights instead of % — Firefox doesn't reliably resolve % heights
+          inside flex containers, causing bars to render at wrong sizes.        */}
       <div className="flex items-end gap-0.5" style={{ height: chartH }}>
         {dates.map((date, i) => {
           const m = movies[i] || 0
           const s = shows[i] || 0
           const u = music[i] || 0
           const total = m + s + u
-          const totalPct = (total / maxVal) * 100
+          const barH = total === 0 ? 2 : Math.max(4, Math.round((total / maxVal) * chartH))
           if (total === 0) return (
-            <div key={date} className="flex-1 flex items-end justify-center" style={{ height: chartH }}>
+            <div key={date} className="flex-1 flex items-end">
               <div className="w-full bg-gray-800/40 rounded-sm" style={{ height: 2 }} />
             </div>
           )
@@ -200,7 +204,7 @@ function PlayChart({ chart, range }: { chart: ChartData; range: number }) {
             <div
               key={date}
               className="flex-1 flex flex-col justify-end rounded-sm overflow-hidden cursor-default"
-              style={{ height: `${totalPct}%`, minHeight: 4 }}
+              style={{ height: barH }}
               title={`${date}\nMovies: ${m}\nTV: ${s}\nMusic: ${u}`}
             >
               {u > 0 && <div className="bg-purple-500 opacity-80" style={{ flex: u }} />}
