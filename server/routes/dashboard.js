@@ -20,6 +20,24 @@ async function safeFetch(url, options = {}, timeout = 5000) {
 
 const arrH = (key) => ({ 'X-Api-Key': key })
 
+// Merge Plex and Tautulli recently-played lists.
+// Plex is the ground truth (always up to date); Tautulli can silently stop logging.
+// De-duplicate by rounding viewedAt to the nearest 5 minutes + title.
+function mergeRecentlyPlayed(plexItems = [], tautulliItems = []) {
+  const seen = new Set()
+  const dedup = (item) => {
+    const bucket = Math.floor(new Date(item.date).getTime() / (5 * 60 * 1000))
+    const key = `${item.title}|${bucket}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }
+  return [...(plexItems || []), ...(tautulliItems || [])]
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .filter(dedup)
+    .slice(0, 15)
+}
+
 async function getRadarrData(url, key) {
   const [status, movies, history] = await Promise.all([
     safeFetch(`${url}/api/v3/system/status`, { headers: arrH(key) }),
@@ -143,15 +161,37 @@ async function getOverseerrData(url, key) {
 
 async function getPlexData(url, token) {
   const headers = { 'X-Plex-Token': token, Accept: 'application/json' }
-  const [identity, sessions] = await Promise.all([
+  const [identity, sessions, accounts, history] = await Promise.all([
     safeFetch(`${url}/identity`, { headers }),
     safeFetch(`${url}/status/sessions`, { headers }),
+    safeFetch(`${url}/accounts`, { headers }),
+    safeFetch(`${url}/status/sessions/history/all?sort=viewedAt:desc&limit=20`, { headers }),
   ])
+
+  // Build accountID → display name map
+  const accountMap = {}
+  for (const a of (accounts.ok ? accounts.data?.MediaContainer?.Account ?? [] : [])) {
+    accountMap[a.id] = a.name || a.title || 'Unknown'
+  }
+
   const meta = sessions.ok ? (sessions.data.MediaContainer?.Metadata || []) : []
   const plexVersion = identity.ok ? (identity.data?.MediaContainer?.version ?? null) : null
+
+  // Parse Plex play history (source of truth — more reliable than Tautulli agent)
+  const recentlyPlayed = history.ok
+    ? (history.data?.MediaContainer?.Metadata ?? []).map((h) => ({
+        title:    h.type === 'episode' ? (h.grandparentTitle || h.title) : h.title,
+        subtitle: h.type === 'episode' ? h.title : (h.year ? String(h.year) : null),
+        type:     h.type,
+        user:     accountMap[h.accountID] || `user#${h.accountID}`,
+        date:     new Date(h.viewedAt * 1000).toISOString(),
+      }))
+    : []
+
   return {
     health: identity.ok ? { ok: true, ...(plexVersion ? { version: plexVersion } : {}) } : { ok: false, error: identity.error },
     activeStreams: sessions.ok ? (sessions.data.MediaContainer?.size ?? meta.length) : null,
+    recentlyPlayed,
     streamDetails: meta.map((m) => {
       const media = m.Media?.[0] || {}
       const ts = m.TranscodeSession
@@ -312,7 +352,9 @@ export default async function dashboardRoutes(fastify) {
       plexStreams: plex?.streamDetails || [],
       recentlyAdded,
       recentlyDownloaded,
-      recentlyPlayed: tautulli?.recentlyPlayed || [],
+      // Plex history is the source of truth; merge Tautulli entries as a supplement
+      // (Tautulli agent can stop logging while Plex keeps its own history up to date).
+      recentlyPlayed: mergeRecentlyPlayed(plex?.recentlyPlayed, tautulli?.recentlyPlayed),
       pendingRequests: overseerr?.pendingRequests || [],
     }
   })
