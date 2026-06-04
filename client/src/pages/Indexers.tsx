@@ -133,6 +133,14 @@ function ProwlarrSection() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['prowlarr-indexers'] }),
   })
 
+  const clearStatus = useMutation({
+    mutationFn: (id: number) => api.delete(`/proxy/prowlarr/api/v1/indexerstatus/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prowlarr-indexerstatus'] })
+      queryClient.invalidateQueries({ queryKey: ['prowlarr-indexers'] })
+    },
+  })
+
   const deleteIndexer = useMutation({
     mutationFn: (id: number) => api.delete(`/proxy/prowlarr/api/v1/indexer/${id}`),
     onSuccess: () => {
@@ -237,13 +245,7 @@ function ProwlarrSection() {
                   <tr key={idx.id} className={`hover:bg-gray-800/20 transition-colors group ${stillDisabled ? 'bg-orange-950/10' : ''}`}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                        <button
-                          onClick={() => toggleEnable.mutate(idx)}
-                          title={idx.enable ? 'Click to disable' : 'Click to enable'}
-                          className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
-                            idx.enable ? 'bg-green-400' : 'bg-gray-600 hover:bg-gray-500'
-                          }`}
-                        />
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${idx.enable ? 'bg-green-400' : 'bg-gray-600'}`} />
                         <span className={`text-sm truncate ${idx.enable ? 'text-white' : 'text-gray-500'}`}>{idx.name}</span>
                         {stillDisabled && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-orange-900/60 text-orange-300 shrink-0">
@@ -281,6 +283,17 @@ function ProwlarrSection() {
                     <td className="px-4 py-3 text-xs text-gray-500 hidden sm:table-cell">{idx.priority}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 justify-end">
+                        {/* Force re-enable for Prowlarr-auto-disabled indexers */}
+                        {stillDisabled && (
+                          <button
+                            onClick={() => clearStatus.mutate(idx.id)}
+                            disabled={clearStatus.isPending}
+                            className="text-xs px-2 py-1 rounded bg-orange-800/60 hover:bg-orange-700 text-orange-300 hover:text-white transition-colors disabled:opacity-50"
+                            title="Clear Prowlarr's failure lock and re-enable"
+                          >
+                            Re-enable
+                          </button>
+                        )}
                         {/* Test result indicator */}
                         {testState === 'ok' && <span className="text-green-400 text-xs">✓</span>}
                         {testState === 'fail' && <span className="text-red-400 text-xs">✗</span>}
@@ -290,6 +303,19 @@ function ProwlarrSection() {
                           className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
                         >
                           {testState === 'testing' ? '…' : 'Test'}
+                        </button>
+                        {/* Enable / Disable toggle — always visible */}
+                        <button
+                          onClick={() => toggleEnable.mutate(idx)}
+                          disabled={toggleEnable.isPending}
+                          className={`text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-50 ${
+                            idx.enable
+                              ? 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-red-900/40 hover:border-red-800 hover:text-red-300'
+                              : 'bg-green-900/40 border-green-800 text-green-400 hover:bg-green-800 hover:text-white'
+                          }`}
+                          title={idx.enable ? 'Disable this indexer' : 'Enable this indexer'}
+                        >
+                          {idx.enable ? 'Disable' : 'Enable'}
                         </button>
                         {deleteTarget === idx.id ? (
                           <>
