@@ -1,7 +1,7 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
-import { getQbitSid } from '../qbitSession.js'
+import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 
 async function safeFetch(url, options = {}, timeout = 5000) {
   try {
@@ -218,9 +218,16 @@ async function getPlexData(url, token) {
 
 async function getQbitData(url, userpass) {
   try {
-    const cookie = await getQbitSid(url, userpass)
-    const [info, active, completed, versionText] = await Promise.all([
-      fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
+    let cookie = await getQbitSid(url, userpass)
+
+    // If qBit was restarted the cached session cookie is stale — detect 403 and re-login once.
+    const probe = await fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) })
+    if (probe.status === 403) cookie = await refreshQbitCookie(url, userpass)
+    const info = probe.status === 403
+      ? await fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json())
+      : await probe.json()
+
+    const [active, completed, versionText] = await Promise.all([
       fetch(`${url}/api/v2/torrents/info?filter=active`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/torrents/info?filter=completed&sort=completion_on&reverse=true&limit=10`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/app/version`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.text()).catch(() => null),

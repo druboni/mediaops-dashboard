@@ -1,7 +1,7 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
-import { getQbitSid } from '../qbitSession.js'
+import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 
 function mapQbitState(state) {
   switch (state) {
@@ -59,11 +59,20 @@ async function nzbRpc(url, userpass, method, params = []) {
 const mbToBytes = (mb) => Math.round((mb || 0) * 1024 * 1024)
 
 async function getQbitData(url, password) {
-  const cookie = await getQbitSid(url, password)
-  const headers = { Cookie: cookie }
+  let cookie = await getQbitSid(url, password)
+  let headers = { Cookie: cookie }
 
-  const [torrents, speedLimitModeText] = await Promise.all([
-    fetch(`${url}/api/v2/torrents/info?filter=all`, { headers, signal: AbortSignal.timeout(8000) }).then((r) => r.json()),
+  // Fetch torrent list — if qBit was restarted the cached cookie is stale (403).
+  // Detect that and transparently re-login once before giving up.
+  let torrentsRes = await fetch(`${url}/api/v2/torrents/info?filter=all`, { headers, signal: AbortSignal.timeout(8000) })
+  if (torrentsRes.status === 403) {
+    cookie = await refreshQbitCookie(url, password)
+    headers = { Cookie: cookie }
+    torrentsRes = await fetch(`${url}/api/v2/torrents/info?filter=all`, { headers, signal: AbortSignal.timeout(8000) })
+  }
+  const torrents = await torrentsRes.json()
+
+  const [speedLimitModeText] = await Promise.all([
     fetch(`${url}/api/v2/transfer/speedLimitsMode`, { headers, signal: AbortSignal.timeout(5000) }).then((r) => r.text()),
   ])
 

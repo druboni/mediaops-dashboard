@@ -13,10 +13,7 @@ export function parseQbitCreds(userpass) {
     : { username: 'admin', password: userpass || '' }
 }
 
-export async function getQbitCookie(url, userpass) {
-  if (cache.url === url && cache.cookie && Date.now() < cache.expires) {
-    return cache.cookie
-  }
+async function doLogin(url, userpass) {
   const { username, password } = parseQbitCreds(userpass)
   const res = await fetch(`${url}/api/v2/auth/login`, {
     method: 'POST',
@@ -43,6 +40,20 @@ export async function getQbitCookie(url, userpass) {
   if (!cookie) throw new Error('No session cookie returned from qBittorrent')
   cache = { url, cookie, expires: Date.now() + 55 * 60 * 1000 }
   return cookie
+}
+
+export async function getQbitCookie(url, userpass) {
+  if (cache.url === url && cache.cookie && Date.now() < cache.expires) {
+    return cache.cookie
+  }
+  return doLogin(url, userpass)
+}
+
+// Called when a request using the cached cookie gets a 403/Forbidden —
+// clears the stale cookie and logs in fresh.
+export async function refreshQbitCookie(url, userpass) {
+  cache = { url: null, cookie: null, expires: 0 }
+  return doLogin(url, userpass)
 }
 
 // Legacy alias — kept so any future callers don't break
