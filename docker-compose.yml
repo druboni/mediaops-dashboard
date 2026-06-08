@@ -2,8 +2,7 @@ services:
   mediaops:
     build: .
     container_name: mediaops
-    ports:
-      - "8990:8080"
+    network_mode: host
     volumes:
       - /opt/mediaops/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -11,4 +10,5 @@ services:
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - NODE_ENV=production
       - NODE_TLS_REJECT_UNAUTHORIZED=0
+      - PORT=8990
     restart: unless-stopped
