@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Rajdhani:wght@400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -380,4 +380,83 @@ button[role="switch"][aria-checked="true"] { background-color: rgb(var(--c-blue-
   --c-purple-300: 187 136 232;
   --c-orange-400: 252 140   0;
   --c-orange-300: 253 170  80;
+}
+
+/* ─── Blueprint (AWS-inspired blue-dark) ─────────────────────────────── */
+[data-theme="blueprint"] {
+  font-family: 'Syne', sans-serif;
+
+  /* Backgrounds: deep blue-black stack */
+  --c-gray-950:  10  12  16;   /* #0a0c10 — page bg */
+  --c-gray-900:  15  18  25;   /* #0f1219 — sidebar / panel bg */
+  --c-gray-800:  21  26  36;   /* #151a24 — card bg */
+  --c-gray-700:  28  35  51;   /* #1c2333 — raised elements */
+  --c-gray-600:  38  48  68;   /* between bg4 and border zone */
+  --c-gray-500:  85  96 112;   /* #556070 — muted labels */
+  --c-gray-400: 136 152 179;   /* #8898b3 — secondary text */
+  --c-gray-300: 180 195 215;   /* mid text */
+  --c-gray-200: 205 215 232;   /* near-primary text */
+  --c-gray-100: 226 232 244;   /* #e2e8f4 — primary text */
+
+  /* Accent: soft steel-blue (#63b3ed) */
+  --c-blue-200: 144 205 244;   /* #90cdf4 — highlight */
+  --c-blue-300: 120 192 240;
+  --c-blue-400:  99 179 237;   /* #63b3ed — main accent */
+  --c-blue-500:  66 153 225;
+  --c-blue-600:  49 130 206;
+  --c-blue-700:  40 104 165;
+  --c-blue-800:  26  58 103;
+  --c-blue-900:  15  33  65;
+  --c-blue-950:  10  18  42;
+
+  /* Status colors — match the AWS guide palette */
+  --c-green-400: 104 211 145;  /* #68d391 */
+  --c-green-300: 154 230 180;  /* #9ae6b4 */
+  --c-green-900:  16  36  26;
+  --c-red-400:   252 129 129;  /* #fc8181 */
+  --c-red-300:   254 178 178;
+  --c-red-500:   245 101 101;
+  --c-red-900:    40  18  18;
+  --c-yellow-400: 246 173  85;  /* #f6ad55 amber */
+  --c-yellow-300: 251 211 141;
+  --c-yellow-500: 236 153  65;
+  --c-yellow-900:  40  26   8;
+  --c-purple-400: 183 148 244;  /* #b794f4 */
+  --c-purple-300: 214 188 250;
+  --c-purple-500: 159 122 234;
+  --c-purple-900:  30  20  48;
+  --c-orange-400: 246 173  85;
+  --c-orange-300: 251 211 141;
+  --c-orange-900:  40  26   8;
+}
+
+/* Blueprint: subtle blue dot-grid on the root layout background */
+[data-theme="blueprint"] .bg-gray-950 {
+  background-image:
+    linear-gradient(rgba(99,179,237,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99,179,237,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Blueprint: monospace font for section labels and stat headings */
+[data-theme="blueprint"] nav p,
+[data-theme="blueprint"] .section-label {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.1em;
+}
+
+/* Blueprint: active nav — brighter blue text to match accent */
+[data-theme="blueprint"] nav a.bg-blue-600 {
+  color: rgb(var(--c-blue-200)) !important;
+}
+
+/* Blueprint: card/panel borders get a blue tint on hover */
+[data-theme="blueprint"] .hover\:border-gray-700:hover,
+[data-theme="blueprint"] .hover\:border-gray-600:hover {
+  border-color: rgba(99,179,237,0.3) !important;
+}
+
+/* Blueprint: version badge in sidebar gets the accent color */
+[data-theme="blueprint"] aside .text-gray-700 {
+  color: rgba(99,179,237,0.35) !important;
 }

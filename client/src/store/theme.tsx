@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 
-export type Theme = 'default' | 'cyberpunk' | 'nord' | 'dracula' | 'sunset' | 'light' | 'windows' | 'system'
+export type Theme = 'default' | 'cyberpunk' | 'nord' | 'dracula' | 'sunset' | 'light' | 'windows' | 'blueprint' | 'system'
 
 export const THEMES: { id: Theme; label: string; accent: string }[] = [
   { id: 'system',    label: 'System',    accent: '#888888' },
   { id: 'default',   label: 'Dark',      accent: '#3b82f6' },
+  { id: 'blueprint', label: 'Blueprint', accent: '#63b3ed' },
   { id: 'light',     label: 'Light',     accent: '#0078D4' },
   { id: 'windows',   label: 'Win Dark',  accent: '#0078D4' },
   { id: 'nord',      label: 'Nord',      accent: '#88C0D0' },
@@ -13,7 +14,7 @@ export const THEMES: { id: Theme; label: string; accent: string }[] = [
   { id: 'cyberpunk', label: 'Cyberpunk', accent: '#FF0080' },
 ]
 
-const VALID: Theme[] = ['default', 'cyberpunk', 'nord', 'dracula', 'sunset', 'light', 'windows', 'system']
+const VALID: Theme[] = ['default', 'cyberpunk', 'nord', 'dracula', 'sunset', 'light', 'windows', 'blueprint', 'system']
 
 const Ctx = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
   theme: 'system',
