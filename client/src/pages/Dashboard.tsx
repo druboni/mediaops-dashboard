@@ -337,43 +337,40 @@ export default function Dashboard() {
           </section>
         )}
 
+      {/* Download clients overview */}
+      {(data.downloads.qbittorrent || data.downloads.nzbget) && (
+        <section className="mb-8">
+          <h2 className="section-label">Downloads</h2>
+          <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+            {data.downloads.qbittorrent && <DownloadRow label="qBittorrent" {...data.downloads.qbittorrent} />}
+            {data.downloads.nzbget      && <DownloadRow label="NZBGet"      {...data.downloads.nzbget} />}
+          </div>
+        </section>
+      )}
+
       {/* Active Downloads */}
       <ActiveDownloads data={downloadsData} />
 
-      {/* 2-col grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Download clients overview */}
-        {(data.downloads.qbittorrent || data.downloads.nzbget) && (
-          <section>
-            <h2 className="section-label">Downloads</h2>
-            <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
-              {data.downloads.qbittorrent && <DownloadRow label="qBittorrent" {...data.downloads.qbittorrent} />}
-              {data.downloads.nzbget      && <DownloadRow label="NZBGet"      {...data.downloads.nzbget} />}
-            </div>
-          </section>
-        )}
-
-        {/* Pending Requests */}
-        {data.pendingRequests.length > 0 && (
-          <section>
-            <h2 className="section-label">Pending Requests</h2>
-            <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
-              {data.pendingRequests.map(req => (
-                <div key={req.id} className="px-4 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-white truncate">{req.title}</p>
-                    <p className="text-xs text-gray-500 capitalize">{req.type} · {req.requestedBy}</p>
-                  </div>
-                  <div className="flex gap-1.5 shrink-0">
-                    <button onClick={() => approveMutation.mutate(req.id)} disabled={approveMutation.isPending} className="text-xs bg-green-700 hover:bg-green-600 text-white px-2.5 py-1 rounded transition-colors disabled:opacity-50">Approve</button>
-                    <button onClick={() => declineMutation.mutate(req.id)}  disabled={declineMutation.isPending}  className="text-xs bg-gray-700  hover:bg-red-700  text-white px-2.5 py-1 rounded transition-colors disabled:opacity-50">Decline</button>
-                  </div>
+      {/* Pending Requests */}
+      {data.pendingRequests.length > 0 && (
+        <section className="mb-8">
+          <h2 className="section-label">Pending Requests</h2>
+          <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+            {data.pendingRequests.map(req => (
+              <div key={req.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-white truncate">{req.title}</p>
+                  <p className="text-xs text-gray-500 capitalize">{req.type} · {req.requestedBy}</p>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
-      </div>
+                <div className="flex gap-1.5 shrink-0">
+                  <button onClick={() => approveMutation.mutate(req.id)} disabled={approveMutation.isPending} className="text-xs bg-green-700 hover:bg-green-600 text-white px-2.5 py-1 rounded transition-colors disabled:opacity-50">Approve</button>
+                  <button onClick={() => declineMutation.mutate(req.id)}  disabled={declineMutation.isPending}  className="text-xs bg-gray-700  hover:bg-red-700  text-white px-2.5 py-1 rounded transition-colors disabled:opacity-50">Decline</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Recently Played */}
       {data.recentlyPlayed.length > 0 && (
