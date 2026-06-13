@@ -299,26 +299,10 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Active Downloads */}
-      <ActiveDownloads data={downloadsData} />
-
-      {/* 2-col grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Download clients overview */}
-        {(data.downloads.qbittorrent || data.downloads.nzbget) && (
-          <section>
-            <h2 className="section-label">Downloads</h2>
-            <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
-              {data.downloads.qbittorrent && <DownloadRow label="qBittorrent" {...data.downloads.qbittorrent} />}
-              {data.downloads.nzbget      && <DownloadRow label="NZBGet"      {...data.downloads.nzbget} />}
-            </div>
-          </section>
-        )}
-
-        {/* Plex Streams */}
-        {data.plexStreams.length > 0 && (
-          <section>
-            <h2 className="section-label">Active Streams</h2>
+      {/* Active Streams — above downloads */}
+      {data.plexStreams.length > 0 && (
+        <section className="mb-8">
+          <h2 className="section-label">Active Streams</h2>
             <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
               {data.plexStreams.map((s, i) => {
                 const pct = s.duration ? Math.round((s.viewOffset / s.duration) * 100) : null
@@ -349,6 +333,22 @@ export default function Dashboard() {
                   </div>
                 )
               })}
+            </div>
+          </section>
+        )}
+
+      {/* Active Downloads */}
+      <ActiveDownloads data={downloadsData} />
+
+      {/* 2-col grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Download clients overview */}
+        {(data.downloads.qbittorrent || data.downloads.nzbget) && (
+          <section>
+            <h2 className="section-label">Downloads</h2>
+            <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+              {data.downloads.qbittorrent && <DownloadRow label="qBittorrent" {...data.downloads.qbittorrent} />}
+              {data.downloads.nzbget      && <DownloadRow label="NZBGet"      {...data.downloads.nzbget} />}
             </div>
           </section>
         )}
