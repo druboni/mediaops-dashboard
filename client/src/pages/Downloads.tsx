@@ -350,6 +350,20 @@ export default function Downloads() {
               <span className="text-xs text-violet-500">
                 {data.importing.length} item{data.importing.length !== 1 ? 's' : ''}
               </span>
+              {data.importing.length > 1 && (
+                <button
+                  onClick={() => {
+                    for (const item of data.importing) {
+                      clearImport.mutate({ service: item.service, id: item.id })
+                    }
+                  }}
+                  disabled={clearImport.isPending}
+                  title="Remove all of these from Sonarr/Radarr queue and download client (use if the files already imported but are stuck)"
+                  className="text-xs px-2 py-0.5 rounded shrink-0 bg-gray-800 hover:bg-red-800 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                >
+                  Clear All
+                </button>
+              )}
             </div>
           </div>
           <div className="divide-y divide-violet-800/20">
