@@ -223,6 +223,12 @@ export default function Downloads() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
 
+  const clearImport = useMutation({
+    mutationFn: (body: { service: 'sonarr' | 'radarr'; id: string }) =>
+      api.post('/downloads/clear-import', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
+  })
+
   const toggleQbitLimit = useMutation({
     mutationFn: () => api.post('/downloads/qbittorrent/toggle-limit'),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
@@ -385,6 +391,14 @@ export default function Downloads() {
                     }`}>
                       {item.state === 'importing' ? 'Copying…' : 'Pending'}
                     </span>
+                    <button
+                      onClick={() => clearImport.mutate({ service: item.service, id: item.id })}
+                      disabled={clearImport.isPending}
+                      title="Remove from Sonarr/Radarr queue and download client (use if the file already imported but is stuck)"
+                      className="text-xs px-2 py-0.5 rounded shrink-0 bg-gray-800 hover:bg-red-800 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                    >
+                      Clear
+                    </button>
                   </div>
 
                   {/* Progress bar */}

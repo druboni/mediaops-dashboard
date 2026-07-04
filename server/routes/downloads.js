@@ -342,6 +342,33 @@ export default async function downloadsRoutes(fastify) {
     }
   })
 
+  fastify.post('/clear-import', async (request, reply) => {
+    const config = await getConfig()
+    const { service, id, removeFromClient = true } = request.body
+    if (!service || !id) return reply.status(400).send({ error: 'service and id required' })
+
+    const svc = config.services[service]
+    if (!svc?.enabled) return reply.status(400).send({ error: `${service} not enabled` })
+
+    try {
+      const url = svc.url.replace(/\/$/, '')
+      const params = new URLSearchParams({
+        removeFromClient: String(removeFromClient),
+        blocklist: 'false',
+        skipRedownload: 'true',
+      })
+      const res = await fetch(`${url}/api/v3/queue/${id}?${params}`, {
+        method: 'DELETE',
+        headers: { 'X-Api-Key': svc.apiKey },
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!res.ok && res.status !== 404) return reply.status(502).send({ ok: false, error: `HTTP ${res.status}` })
+      return { ok: true }
+    } catch (err) {
+      return reply.status(502).send({ ok: false, error: err.message })
+    }
+  })
+
   fastify.post('/nzbget/set-limit', async (request, reply) => {
     const config = await getConfig()
     const svc = config.services.nzbget
