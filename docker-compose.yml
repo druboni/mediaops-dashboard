@@ -6,6 +6,7 @@ services:
     volumes:
       - /opt/mediaops/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /mnt/plex:/mnt/plex:ro
     environment:
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - NODE_ENV=production

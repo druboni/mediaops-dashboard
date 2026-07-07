@@ -1,7 +1,19 @@
+import { statfs } from 'fs/promises'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
+
+async function getDiskUsage(path) {
+  try {
+    const s = await statfs(path)
+    const total = s.blocks * s.bsize
+    const free = s.bavail * s.bsize
+    return { total, free, used: total - free }
+  } catch {
+    return null
+  }
+}
 
 async function safeFetch(url, options = {}, timeout = 5000) {
   try {
@@ -288,7 +300,7 @@ export default async function dashboardRoutes(fastify) {
     const on = (name) => svcs[name]?.enabled
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
-    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, huntarr, requestrr, tautulli] =
+    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, huntarr, requestrr, tautulli, plexDisk] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -303,6 +315,7 @@ export default async function dashboardRoutes(fastify) {
         on('huntarr')     ? getSimpleHealth(at('huntarr').url, '/api/status', arrH(at('huntarr').key)) : null,
         on('requestrr')   ? getSimpleHealth(at('requestrr').url, '/')                     : null,
         on('tautulli')    ? getTautulliData(at('tautulli').url, at('tautulli').key)       : null,
+        getDiskUsage('/mnt/plex'),
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
@@ -352,6 +365,7 @@ export default async function dashboardRoutes(fastify) {
         plexStreams:     plex?.activeStreams  ?? null,
         pendingRequests: overseerr?.pendingCount ?? null,
       },
+      plexDisk,
       downloads: {
         qbittorrent: on('qbittorrent') && qbit ? { ok: qbit.health.ok, dlSpeed: qbit.dlSpeed, upSpeed: qbit.upSpeed, active: qbit.activeCount } : null,
         nzbget:      on('nzbget') && nzbget     ? { ok: nzbget.health.ok, dlSpeed: nzbget.dlSpeed, active: nzbget.activeCount }                  : null,

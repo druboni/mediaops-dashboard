@@ -18,6 +18,7 @@ interface DashboardData {
     artists: number | null; albums: number | null
     plexStreams: number | null; pendingRequests: number | null
   }
+  plexDisk: { total: number; free: number; used: number } | null
   downloads: {
     qbittorrent: { ok: boolean; dlSpeed: number; upSpeed: number; active: number } | null
     nzbget:      { ok: boolean; dlSpeed: number; active: number } | null
@@ -296,6 +297,12 @@ export default function Dashboard() {
           <StatCard label="Episodes" value={data.stats.episodes} />
           <StatCard label="Streams"  value={data.stats.plexStreams}      highlight={!!data.stats.plexStreams} />
           <StatCard label="Requests" value={data.stats.pendingRequests}  highlight={!!data.stats.pendingRequests} />
+          {data.plexDisk && (
+            <>
+              <StatCard label="Plex Drive Total"     value={formatDiskBytes(data.plexDisk.total)} />
+              <StatCard label="Plex Drive Available"  value={formatDiskBytes(data.plexDisk.free)} />
+            </>
+          )}
         </div>
       </section>
 
@@ -444,11 +451,18 @@ export default function Dashboard() {
 }
 
 // ── Small components ───────────────────────────────────────────────────
-function StatCard({ label, value, highlight = false }: { label: string; value: number | null; highlight?: boolean }) {
+function formatDiskBytes(bytes: number): string {
+  const tb = bytes / 1_099_511_627_776
+  if (tb >= 1) return `${tb.toFixed(1)} TB`
+  const gb = bytes / 1_073_741_824
+  return `${gb.toFixed(0)} GB`
+}
+
+function StatCard({ label, value, highlight = false }: { label: string; value: number | string | null; highlight?: boolean }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
       <p className={`text-2xl font-bold tabular-nums ${highlight && value ? 'text-blue-400' : 'text-white'}`}>
-        {value === null ? '—' : value.toLocaleString()}
+        {value === null ? '—' : typeof value === 'number' ? value.toLocaleString() : value}
       </p>
       <p className="text-xs text-gray-500 mt-0.5">{label}</p>
     </div>
