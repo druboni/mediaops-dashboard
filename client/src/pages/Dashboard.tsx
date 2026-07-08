@@ -301,6 +301,7 @@ export default function Dashboard() {
             <>
               <StatCard label="Plex Drive Total"     value={formatDiskBytes(data.plexDisk.total)} />
               <StatCard label="Plex Drive Available"  value={formatDiskBytes(data.plexDisk.free)} />
+              <DiskUsageCard disk={data.plexDisk} />
             </>
           )}
         </div>
@@ -456,6 +457,21 @@ function formatDiskBytes(bytes: number): string {
   if (tb >= 1) return `${tb.toFixed(1)} TB`
   const gb = bytes / 1_073_741_824
   return `${gb.toFixed(0)} GB`
+}
+
+function DiskUsageCard({ disk }: { disk: { total: number; free: number; used: number } }) {
+  const pct = disk.total > 0 ? (disk.used / disk.total) * 100 : 0
+  const color = pct >= 95 ? 'text-red-400' : pct >= 90 ? 'text-orange-400' : 'text-white'
+  const barColor = pct >= 95 ? 'bg-red-500' : pct >= 90 ? 'bg-orange-500' : 'bg-blue-500'
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+      <p className={`text-2xl font-bold tabular-nums ${color}`}>{pct.toFixed(1)}%</p>
+      <p className="text-xs text-gray-500 mt-0.5">Plex Drive Used</p>
+      <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+    </div>
+  )
 }
 
 function StatCard({ label, value, highlight = false }: { label: string; value: number | string | null; highlight?: boolean }) {
