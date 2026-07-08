@@ -77,13 +77,17 @@ export default async function wantedRoutes(fastify) {
     const config = await getConfig()
     const { radarr, sonarr } = config.services
 
-    const [moviesRes, episodesRes] = await Promise.allSettled([
+    const [moviesRes, movieListRes, episodesRes] = await Promise.allSettled([
       radarr?.enabled
         ? safeFetch(
             `${radarr.url.replace(/\/$/, '')}/api/v3/wanted/cutoff?pageSize=100&sortKey=title&sortDirection=ascending&monitored=true`,
             { headers: arrH(radarr.apiKey) }
           )
         : Promise.resolve({ ok: true, data: { records: [], totalRecords: 0 } }),
+      // wanted/cutoff omits movieFile, so fetch the movie list to map current quality
+      radarr?.enabled
+        ? safeFetch(`${radarr.url.replace(/\/$/, '')}/api/v3/movie`, { headers: arrH(radarr.apiKey) })
+        : Promise.resolve({ ok: true, data: [] }),
       sonarr?.enabled
         ? safeFetch(
             `${sonarr.url.replace(/\/$/, '')}/api/v3/wanted/cutoff?pageSize=100&sortKey=airDateUtc&sortDirection=descending&monitored=true&includeSeries=true&includeEpisodeFile=true`,
@@ -92,13 +96,21 @@ export default async function wantedRoutes(fastify) {
         : Promise.resolve({ ok: true, data: { records: [], totalRecords: 0 } }),
     ])
 
+    const qualityMap = new Map(
+      movieListRes.status === 'fulfilled' && movieListRes.value.ok && Array.isArray(movieListRes.value.data)
+        ? movieListRes.value.data
+            .filter((m) => m.movieFile?.quality?.quality?.name)
+            .map((m) => [m.id, m.movieFile.quality.quality.name])
+        : []
+    )
+
     const moviesOk = moviesRes.status === 'fulfilled' && moviesRes.value.ok
     const movies = moviesOk
       ? (moviesRes.value.data.records || []).map((m) => ({
           id: m.id,
           title: m.title,
           year: m.year,
-          currentQuality: m.movieFile?.quality?.quality?.name || 'Unknown',
+          currentQuality: m.movieFile?.quality?.quality?.name || qualityMap.get(m.id) || 'Unknown',
           sizeOnDisk: m.movieFile?.size || m.sizeOnDisk || 0,
         }))
       : []
