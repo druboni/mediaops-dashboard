@@ -1,3 +1,4 @@
+import { statfs } from 'fs/promises'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 
@@ -46,6 +47,22 @@ export default async function healthRoutes(fastify) {
         }
       }
     }
+
+    // Plex drive low-space alert: warning under 10% free, error under 5%
+    try {
+      const s = await statfs('/mnt/plex')
+      const total = s.blocks * s.bsize
+      const free = s.bavail * s.bsize
+      if (total > 0) {
+        const pctFree = (free / total) * 100
+        const freeTB = (free / 1_099_511_627_776).toFixed(1)
+        if (pctFree < 5) {
+          alerts.push({ service: 'storage', level: 'error', source: 'disk', message: `Plex drive critically low: ${freeTB} TB free (${pctFree.toFixed(1)}%)` })
+        } else if (pctFree < 10) {
+          alerts.push({ service: 'storage', level: 'warning', source: 'disk', message: `Plex drive low on space: ${freeTB} TB free (${pctFree.toFixed(1)}%)` })
+        }
+      }
+    } catch { /* drive not mounted in container — skip */ }
 
     // Prowlarr: temporarily disabled indexers
     let indexerStatus = []

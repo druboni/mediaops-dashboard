@@ -29,6 +29,37 @@ interface WantedData {
   episodes: WantedEpisode[]
 }
 
+interface CutoffMovie {
+  id: number
+  title: string
+  year: number
+  currentQuality: string
+  sizeOnDisk: number
+}
+
+interface CutoffEpisode {
+  id: number
+  seriesId: number
+  seriesTitle: string
+  seasonNumber: number
+  episodeNumber: number
+  title: string
+  currentQuality: string
+  sizeOnDisk: number
+}
+
+interface CutoffData {
+  movies: CutoffMovie[]
+  episodes: CutoffEpisode[]
+  totals: { movies: number; episodes: number }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`
+  return '—'
+}
+
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return '—'
   const d = new Date(dateStr)
@@ -49,6 +80,7 @@ function epCode(s: number, e: number) {
 export default function Wanted() {
   const { enabledServices } = useConfig()
   const queryClient = useQueryClient()
+  const [mode, setMode] = useState<'missing' | 'upgrades'>('missing')
   const [tab, setTab] = useState<'movies' | 'episodes'>('movies')
   const [searching, setSearching] = useState<Set<string>>(new Set())
   const [searched, setSearched] = useState<Set<string>>(new Set())
@@ -61,6 +93,13 @@ export default function Wanted() {
     queryFn: async () => (await api.get<WantedData>('/wanted')).data,
     refetchInterval: 60_000,
     enabled: hasRadarr || hasSonarr,
+  })
+
+  const { data: cutoffData, isLoading: cutoffLoading } = useQuery<CutoffData>({
+    queryKey: ['wanted-cutoff'],
+    queryFn: async () => (await api.get<CutoffData>('/wanted/cutoff')).data,
+    refetchInterval: 300_000,
+    enabled: (hasRadarr || hasSonarr) && mode === 'upgrades',
   })
 
   const searchMovie = useMutation({
@@ -116,19 +155,45 @@ export default function Wanted() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Wanted / Missing</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Monitored items not yet downloaded</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {mode === 'missing' ? 'Monitored items not yet downloaded' : 'Items below quality cutoff, eligible for a better version'}
+          </p>
         </div>
-        {data && (
-          <div className="text-xs text-gray-600 text-right">
-            <div>{movies.length} movies missing</div>
-            <div>{episodes.length} episodes missing</div>
+        <div className="flex items-center gap-4">
+          {mode === 'missing' && data && (
+            <div className="text-xs text-gray-600 text-right">
+              <div>{movies.length} movies missing</div>
+              <div>{episodes.length} episodes missing</div>
+            </div>
+          )}
+          {mode === 'upgrades' && cutoffData && (
+            <div className="text-xs text-gray-600 text-right">
+              <div>{cutoffData.totals.movies} movies below cutoff</div>
+              <div>{cutoffData.totals.episodes} episodes below cutoff</div>
+            </div>
+          )}
+          <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs shrink-0">
+            {(['missing', 'upgrades'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`px-3 py-1.5 transition-colors capitalize ${
+                  mode === m ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
+                }`}
+              >
+                {m === 'missing' ? 'Missing' : 'Upgrades'}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-5 border-b border-gray-800">
-        {([['movies', 'Movies', movies.length], ['episodes', 'TV Episodes', episodes.length]] as const).map(([t, label, count]) => (
+        {([
+          ['movies', 'Movies', mode === 'missing' ? movies.length : cutoffData?.movies.length ?? 0],
+          ['episodes', 'TV Episodes', mode === 'missing' ? episodes.length : cutoffData?.episodes.length ?? 0],
+        ] as const).map(([t, label, count]) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -138,14 +203,128 @@ export default function Wanted() {
             }`}
           >
             {label}
-            {!isLoading && (
+            {!(mode === 'missing' ? isLoading : cutoffLoading) && (
               <span className="ml-1.5 text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded-full">{count}</span>
             )}
           </button>
         ))}
       </div>
 
-      {isLoading ? (
+      {mode === 'upgrades' ? (
+        cutoffLoading ? (
+          <div className="space-y-2">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="bg-gray-900 border border-gray-800 rounded-lg h-14 animate-pulse" />
+            ))}
+          </div>
+        ) : tab === 'movies' ? (
+          !cutoffData?.movies.length ? (
+            <div className="text-center py-20 text-gray-600 text-sm">All movies meet their quality cutoff 🎉</div>
+          ) : (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
+                    <th className="text-left px-4 py-2.5 font-medium">Movie</th>
+                    <th className="text-left px-4 py-2.5 font-medium hidden sm:table-cell">Year</th>
+                    <th className="text-left px-4 py-2.5 font-medium">Current Quality</th>
+                    <th className="text-left px-4 py-2.5 font-medium hidden md:table-cell">Size</th>
+                    <th className="px-4 py-2.5 w-28" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/50">
+                  {cutoffData.movies.map((m) => {
+                    const key = `movie-${m.id}`
+                    const isSearching = searching.has(key)
+                    const wasSearched = searched.has(key)
+                    return (
+                      <tr key={m.id} className="hover:bg-gray-800/30 transition-colors group">
+                        <td className="px-4 py-3">
+                          <span className="text-white font-medium">{m.title}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs hidden sm:table-cell">{m.year || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-900/40 text-orange-300">{m.currentQuality}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs tabular-nums hidden md:table-cell">{formatSize(m.sizeOnDisk)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => searchMovie.mutate(m.id)}
+                            disabled={isSearching || wasSearched}
+                            className={`text-xs px-3 py-1 rounded transition-colors ${
+                              wasSearched
+                                ? 'bg-green-900/40 text-green-400 cursor-default'
+                                : isSearching
+                                ? 'bg-gray-700 text-gray-500 cursor-wait'
+                                : 'bg-gray-700 hover:bg-blue-700 text-gray-300 hover:text-white opacity-0 group-hover:opacity-100'
+                            }`}
+                          >
+                            {wasSearched ? '✓ Searching' : isSearching ? '…' : 'Upgrade'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : (
+          !cutoffData?.episodes.length ? (
+            <div className="text-center py-20 text-gray-600 text-sm">All episodes meet their quality cutoff 🎉</div>
+          ) : (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
+                    <th className="text-left px-4 py-2.5 font-medium">Episode</th>
+                    <th className="text-left px-4 py-2.5 font-medium">Current Quality</th>
+                    <th className="text-left px-4 py-2.5 font-medium hidden md:table-cell">Size</th>
+                    <th className="px-4 py-2.5 w-28" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/50">
+                  {cutoffData.episodes.map((ep) => {
+                    const key = `ep-${ep.id}`
+                    const isSearching = searching.has(key)
+                    const wasSearched = searched.has(key)
+                    return (
+                      <tr key={ep.id} className="hover:bg-gray-800/30 transition-colors group">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-white font-medium truncate">{ep.seriesTitle}</span>
+                            <span className="text-xs text-gray-500 font-mono shrink-0">{epCode(ep.seasonNumber, ep.episodeNumber)}</span>
+                            <span className="text-xs text-gray-500 truncate hidden lg:inline">{ep.title}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-900/40 text-orange-300">{ep.currentQuality}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs tabular-nums hidden md:table-cell">{formatSize(ep.sizeOnDisk)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => searchEpisode.mutate(ep.id)}
+                            disabled={isSearching || wasSearched}
+                            className={`text-xs px-3 py-1 rounded transition-colors ${
+                              wasSearched
+                                ? 'bg-green-900/40 text-green-400 cursor-default'
+                                : isSearching
+                                ? 'bg-gray-700 text-gray-500 cursor-wait'
+                                : 'bg-gray-700 hover:bg-blue-700 text-gray-300 hover:text-white opacity-0 group-hover:opacity-100'
+                            }`}
+                          >
+                            {wasSearched ? '✓ Searching' : isSearching ? '…' : 'Upgrade'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        )
+      ) : isLoading ? (
         <div className="space-y-2">
           {[...Array(8)].map((_, i) => (
             <div key={i} className="bg-gray-900 border border-gray-800 rounded-lg h-14 animate-pulse" />

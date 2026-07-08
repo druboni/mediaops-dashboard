@@ -72,6 +72,61 @@ export default async function wantedRoutes(fastify) {
     return { movies, episodes }
   })
 
+  // Items below quality cutoff, eligible for upgrade
+  fastify.get('/cutoff', async () => {
+    const config = await getConfig()
+    const { radarr, sonarr } = config.services
+
+    const [moviesRes, episodesRes] = await Promise.allSettled([
+      radarr?.enabled
+        ? safeFetch(
+            `${radarr.url.replace(/\/$/, '')}/api/v3/wanted/cutoff?pageSize=100&sortKey=title&sortDirection=ascending&monitored=true`,
+            { headers: arrH(radarr.apiKey) }
+          )
+        : Promise.resolve({ ok: true, data: { records: [], totalRecords: 0 } }),
+      sonarr?.enabled
+        ? safeFetch(
+            `${sonarr.url.replace(/\/$/, '')}/api/v3/wanted/cutoff?pageSize=100&sortKey=airDateUtc&sortDirection=descending&monitored=true&includeSeries=true&includeEpisodeFile=true`,
+            { headers: arrH(sonarr.apiKey) }
+          )
+        : Promise.resolve({ ok: true, data: { records: [], totalRecords: 0 } }),
+    ])
+
+    const moviesOk = moviesRes.status === 'fulfilled' && moviesRes.value.ok
+    const movies = moviesOk
+      ? (moviesRes.value.data.records || []).map((m) => ({
+          id: m.id,
+          title: m.title,
+          year: m.year,
+          currentQuality: m.movieFile?.quality?.quality?.name || 'Unknown',
+          sizeOnDisk: m.movieFile?.size || m.sizeOnDisk || 0,
+        }))
+      : []
+
+    const episodesOk = episodesRes.status === 'fulfilled' && episodesRes.value.ok
+    const episodes = episodesOk
+      ? (episodesRes.value.data.records || []).map((e) => ({
+          id: e.id,
+          seriesId: e.seriesId,
+          seriesTitle: e.series?.title || 'Unknown',
+          seasonNumber: e.seasonNumber,
+          episodeNumber: e.episodeNumber,
+          title: e.title,
+          currentQuality: e.episodeFile?.quality?.quality?.name || 'Unknown',
+          sizeOnDisk: e.episodeFile?.size || 0,
+        }))
+      : []
+
+    return {
+      movies,
+      episodes,
+      totals: {
+        movies: moviesOk ? (moviesRes.value.data.totalRecords ?? movies.length) : 0,
+        episodes: episodesOk ? (episodesRes.value.data.totalRecords ?? episodes.length) : 0,
+      },
+    }
+  })
+
   fastify.post('/search/movie', async (request, reply) => {
     const config = await getConfig()
     const svc = config.services.radarr

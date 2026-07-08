@@ -58,6 +58,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  const [restoreMsg, setRestoreMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
+
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -101,6 +103,33 @@ export default function Settings() {
       setTimeout(() => setSaved(false), 3000)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleBackup = async () => {
+    const res = await api.get('/config/backup', { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `mediaops-config-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleRestore = async (file: File) => {
+    setRestoreMsg(null)
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      await api.post('/config/restore', parsed)
+      setRestoreMsg({ type: 'ok', text: 'Config restored — reloading…' })
+      setTimeout(() => window.location.reload(), 1200)
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined
+      setRestoreMsg({ type: 'error', text: msg || 'Invalid backup file' })
     }
   }
 
@@ -280,6 +309,41 @@ export default function Settings() {
           >
             Add
           </button>
+        </div>
+      </section>
+
+      {/* Backup & Restore */}
+      <section className="mt-10 pt-8 border-t border-gray-800">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Backup &amp; Restore</h2>
+        <p className="text-xs text-gray-600 mb-4">Export or import the full config (service URLs, API keys, links, settings)</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-center gap-3 flex-wrap">
+          <button
+            onClick={handleBackup}
+            className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            Download Backup
+          </button>
+          <label className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer">
+            Restore from File…
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) handleRestore(f)
+                e.target.value = ''
+              }}
+            />
+          </label>
+          {restoreMsg && (
+            <p className={`text-xs ${restoreMsg.type === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+              {restoreMsg.text}
+            </p>
+          )}
+          <p className="text-xs text-gray-600 w-full">
+            ⚠ The backup contains API keys in plain text — store it somewhere safe. Restoring overwrites the current config.
+          </p>
         </div>
       </section>
 

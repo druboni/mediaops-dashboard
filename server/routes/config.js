@@ -64,6 +64,32 @@ export default async function configRoutes(fastify) {
     return updated
   })
 
+  // Download the full config as a backup file
+  fastify.get('/backup', async (request, reply) => {
+    const config = await getConfig()
+    const stamp = new Date().toISOString().slice(0, 10)
+    reply
+      .header('Content-Type', 'application/json')
+      .header('Content-Disposition', `attachment; filename="mediaops-config-${stamp}.json"`)
+    return config
+  })
+
+  // Restore config from an uploaded backup
+  fastify.post('/restore', async (request, reply) => {
+    const body = request.body
+    if (!body || typeof body !== 'object' || !body.services || typeof body.services !== 'object')
+      return reply.status(400).send({ error: 'Invalid backup file: missing services' })
+
+    // Merge onto defaults so a backup from an older version still gets new fields
+    const restored = {
+      ...structuredClone(DEFAULT_CONFIG),
+      ...body,
+      services: { ...DEFAULT_CONFIG.services, ...body.services },
+    }
+    await saveConfig(restored)
+    return { ok: true }
+  })
+
   fastify.put('/password', async (request, reply) => {
     const { currentPassword, newPassword } = request.body
     const { default: bcrypt } = await import('bcryptjs')
