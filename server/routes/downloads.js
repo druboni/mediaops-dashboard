@@ -121,7 +121,9 @@ async function getArrQueue(url, apiKey, service) {
     const importing = records
       .filter((r) => {
         const state = r.trackedDownloadState
-        return state === 'importPending' || state === 'importing'
+        // importBlocked = finished downloading but Radarr/Sonarr can't auto-import
+        // (e.g. ambiguous release match) — needs the same visibility as active imports.
+        return state === 'importPending' || state === 'importing' || state === 'importBlocked'
       })
       .map((r) => {
         let title = r.title || 'Unknown'
@@ -143,7 +145,7 @@ async function getArrQueue(url, apiKey, service) {
           service,
           mediaTitle,
           title,
-          state: r.trackedDownloadState,   // 'importPending' | 'importing'
+          state: r.trackedDownloadState,   // 'importPending' | 'importing' | 'importBlocked'
           downloadClient: r.downloadClient || null,
           downloadId: r.downloadId || null, // torrent hash for qBittorrent
           protocol: r.protocol || null,    // 'torrent' | 'usenet'

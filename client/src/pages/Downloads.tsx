@@ -24,7 +24,7 @@ interface ImportingItem {
   service: 'sonarr' | 'radarr'
   mediaTitle: string | null
   title: string
-  state: 'importPending' | 'importing'
+  state: 'importPending' | 'importing' | 'importBlocked'
   downloadClient: string | null
   downloadId: string | null   // qBittorrent torrent hash
   protocol: 'torrent' | 'usenet' | null
@@ -395,15 +395,19 @@ export default function Downloads() {
                         {item.title}
                       </div>
                       {item.statusMessages.length > 0 && (
-                        <div className="text-xs text-amber-400 mt-0.5 truncate">{item.statusMessages[0]}</div>
+                        <div className={`text-xs mt-0.5 truncate ${item.state === 'importBlocked' ? 'text-red-400' : 'text-amber-400'}`}>
+                          {item.statusMessages[0]}
+                        </div>
                       )}
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 font-medium ${
                       item.state === 'importing'
                         ? 'bg-violet-700/60 text-violet-200'
+                        : item.state === 'importBlocked'
+                        ? 'bg-red-900/60 text-red-300'
                         : 'bg-gray-700/60 text-gray-400'
                     }`}>
-                      {item.state === 'importing' ? 'Copying…' : 'Pending'}
+                      {item.state === 'importing' ? 'Copying…' : item.state === 'importBlocked' ? 'Blocked' : 'Pending'}
                     </span>
                     <button
                       onClick={() => clearImport.mutate({ service: item.service, id: item.id })}
