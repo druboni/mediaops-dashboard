@@ -20,6 +20,7 @@ import wantedRoutes from './routes/wanted.js'
 import historyRoutes from './routes/history.js'
 import statsRoutes from './routes/stats.js'
 import plexRoutes from './routes/plex.js'
+import { startAutoBackup } from './autoBackup.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -72,3 +73,5 @@ const PORT = parseInt(process.env.PORT || '8080')
 const HOST = process.env.HOST || '0.0.0.0'
 await fastify.listen({ port: PORT, host: HOST })
 console.log(`MediaOps server running on http://${HOST}:${PORT}`)
+
+startAutoBackup()

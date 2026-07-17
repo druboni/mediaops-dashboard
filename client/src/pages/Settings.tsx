@@ -59,6 +59,7 @@ export default function Settings() {
   const [saved, setSaved] = useState(false)
 
   const [restoreMsg, setRestoreMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
+  const [autoBackups, setAutoBackups] = useState<{ name: string; size: number; createdAt: string }[]>([])
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -71,6 +72,10 @@ export default function Settings() {
     if (typeof config?.autoDeleteAfterImport === 'boolean')
       setAutoDeleteAfterImport(config.autoDeleteAfterImport)
   }, [config])
+
+  useEffect(() => {
+    api.get('/config/backups').then((res) => setAutoBackups(res.data)).catch(() => {})
+  }, [])
 
   const updateService = (name: ServiceName, field: keyof ServiceConfig, value: string | boolean) => {
     setServices((prev) => ({ ...prev, [name]: { ...prev[name], [field]: value } }))
@@ -345,6 +350,24 @@ export default function Settings() {
             ⚠ The backup contains API keys in plain text — store it somewhere safe. Restoring overwrites the current config.
           </p>
         </div>
+
+        {autoBackups.length > 0 && (
+          <div className="mt-3 bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <p className="text-xs text-gray-500 mb-2">
+              Automatic weekly backups (kept on disk, last {autoBackups.length})
+            </p>
+            <div className="space-y-1">
+              {autoBackups.map((b) => (
+                <div key={b.name} className="flex items-center justify-between text-xs text-gray-500">
+                  <span className="font-mono truncate">{b.name}</span>
+                  <span className="shrink-0 ml-3">
+                    {(b.size / 1024).toFixed(0)} KB · {new Date(b.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="mt-10 pt-8 border-t border-gray-800">

@@ -223,7 +223,7 @@ function ProwlarrSection() {
       ) : !indexers?.length ? (
         <p className="text-gray-600 text-sm py-8 text-center">No indexers configured in Prowlarr</p>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
@@ -378,7 +378,7 @@ function JackettSection() {
           <div className="flex items-center gap-3 mb-4">
             <span className="text-xs text-gray-600">{configured.length} configured · {unconfigured.length} available</span>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
@@ -504,7 +504,7 @@ function SearchSection() {
       )}
 
       {results && results.length > 0 && (
-        <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">

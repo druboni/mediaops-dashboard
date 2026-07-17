@@ -1,7 +1,9 @@
 import { requireAuth } from '../middleware/auth.js'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir, readdir, stat } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import { join, dirname } from 'path'
+
+const BACKUP_DIR = process.env.BACKUP_DIR || join(dirname(fileURLToPath(import.meta.url)), '../../config/backups')
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CONFIG_PATH = process.env.CONFIG_PATH || join(__dirname, '../../config/config.json')
@@ -88,6 +90,23 @@ export default async function configRoutes(fastify) {
     }
     await saveConfig(restored)
     return { ok: true }
+  })
+
+  // List automatic weekly backups (most recent first)
+  fastify.get('/backups', async () => {
+    try {
+      const files = (await readdir(BACKUP_DIR)).filter((f) => f.startsWith('auto-') && f.endsWith('.json'))
+      const withStats = await Promise.all(
+        files.map(async (f) => {
+          const s = await stat(join(BACKUP_DIR, f))
+          return { name: f, size: s.size, createdAt: s.mtime.toISOString() }
+        })
+      )
+      withStats.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      return withStats
+    } catch {
+      return []
+    }
   })
 
   fastify.put('/password', async (request, reply) => {

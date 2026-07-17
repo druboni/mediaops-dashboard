@@ -221,7 +221,7 @@ export default function Wanted() {
           !cutoffData?.movies.length ? (
             <div className="text-center py-20 text-gray-600 text-sm">All movies meet their quality cutoff 🎉</div>
           ) : (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
@@ -273,7 +273,7 @@ export default function Wanted() {
           !cutoffData?.episodes.length ? (
             <div className="text-center py-20 text-gray-600 text-sm">All episodes meet their quality cutoff 🎉</div>
           ) : (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
@@ -334,7 +334,7 @@ export default function Wanted() {
         movies.length === 0 ? (
           <div className="text-center py-20 text-gray-600 text-sm">No missing movies 🎉</div>
         ) : (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
@@ -389,7 +389,7 @@ export default function Wanted() {
               const isSearchingAll = searching.has(seriesKey)
               const wasSearchedAll = searched.has(seriesKey)
               return (
-                <div key={seriesId} className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+                <div key={seriesId} className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
                   <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between gap-3">
                     <div>
                       <span className="text-white font-semibold">{title}</span>

@@ -102,7 +102,7 @@ function RequestDetailPanel({
     : []
 
   return (
-    <div className="fixed right-0 top-0 h-screen w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
+    <div className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
@@ -217,7 +217,7 @@ function IssueDetailPanel({
   const title = mediaTitle(issue.media) // issue from list has enriched title; fullIssue from proxy does not
 
   return (
-    <div className="fixed right-0 top-0 h-screen w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
+    <div className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
@@ -438,7 +438,7 @@ export default function Requests() {
   const allPages = allData?.pageInfo.pages ?? 0
 
   return (
-    <div className={`p-6 transition-all duration-200 ${panelOpen ? 'pr-[436px]' : ''}`}>
+    <div className={`p-6 transition-all duration-200 ${panelOpen ? 'sm:pr-[436px]' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-bold text-white">Requests</h1>
@@ -610,7 +610,7 @@ export default function Requests() {
           ) : !issuesData?.results.length ? (
             <EmptyState message="No issues found" />
           ) : (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+            <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
@@ -719,7 +719,7 @@ function RequestTable({
   onToggleBatch?: (id: number) => void
 }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+    <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">

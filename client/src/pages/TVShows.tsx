@@ -118,7 +118,7 @@ function SeriesDetailPanel({
     .sort((a, b) => b.seasonNumber - a.seasonNumber)
 
   return (
-    <div className="fixed right-0 top-0 h-screen w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
+    <div className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 shrink-0">
         <span className="text-sm font-semibold text-white truncate pr-2">{series.title}</span>
@@ -517,7 +517,7 @@ export default function TVShows() {
   }
 
   return (
-    <div className={`p-6 transition-all duration-200 ${selected ? 'pr-[436px]' : ''}`}>
+    <div className={`p-6 transition-all duration-200 ${selected ? 'sm:pr-[436px]' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
@@ -568,7 +568,7 @@ export default function TVShows() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-20 text-gray-600 text-sm">No shows found</div>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
