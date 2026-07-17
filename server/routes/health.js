@@ -64,6 +64,32 @@ export default async function healthRoutes(fastify) {
       }
     } catch { /* drive not mounted in container — skip */ }
 
+    // Blocked imports: Sonarr/Radarr grabbed a release but can't auto-import it
+    // (e.g. ambiguous match) — these silently sit in the queue needing manual action.
+    const blockedResults = await Promise.allSettled(
+      ['sonarr', 'radarr']
+        .filter((name) => on(name))
+        .map(async (name) => {
+          const endpoint = name === 'sonarr'
+            ? '/api/v3/queue?pageSize=100&includeSeries=true&includeEpisode=true'
+            : '/api/v3/queue?pageSize=100&includeMovie=true'
+          const data = await safeFetch(baseUrl(name) + endpoint, apiKey(name))
+          return { name, records: data?.records ?? [] }
+        })
+    )
+    for (const r of blockedResults) {
+      if (r.status !== 'fulfilled') continue
+      const { name, records } = r.value
+      for (const rec of records) {
+        if (rec.trackedDownloadState !== 'importBlocked') continue
+        const title = name === 'sonarr'
+          ? (rec.series?.title || rec.title || 'Unknown')
+          : (rec.movie?.title || rec.title || 'Unknown')
+        const reason = (rec.statusMessages || []).flatMap((s) => s.messages || [])[0] || 'Manual import required'
+        alerts.push({ service: name, level: 'warning', source: 'import', message: `${title}: ${reason}` })
+      }
+    }
+
     // Prowlarr: temporarily disabled indexers
     let indexerStatus = []
     if (on('prowlarr')) {
