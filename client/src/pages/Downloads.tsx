@@ -47,6 +47,26 @@ interface DownloadsData {
   }
 }
 
+interface ManualImportFile {
+  id: number
+  path: string
+  name: string
+  size: number
+  quality: unknown
+  qualityName: string
+  releaseGroup: string | null
+  languages: { id: number; name: string }[]
+  indexerFlags: number
+  downloadId: string
+  rejections: string[]
+  movieId: number | null
+  movieTitle: string | null
+  seriesId: number | null
+  seriesTitle: string | null
+  episodeIds: number[]
+  episodeLabels: string[]
+}
+
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`
@@ -165,6 +185,8 @@ export default function Downloads() {
   const [clientFilter, setClientFilter] = useState<'all' | 'qbittorrent' | 'nzbget'>('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [deleteTarget, setDeleteTarget] = useState<DownloadItem | null>(null)
+  const [manualImportItem, setManualImportItem] = useState<ImportingItem | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set())
 
   const hasQbit = enabledServices.includes('qbittorrent')
   const hasNzb = enabledServices.includes('nzbget')
@@ -228,6 +250,31 @@ export default function Downloads() {
       api.post('/downloads/clear-import', body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
+
+  const { data: manualImportFiles, isLoading: manualImportLoading, error: manualImportError } = useQuery<{ files: ManualImportFile[] }>({
+    queryKey: ['manual-import', manualImportItem?.service, manualImportItem?.downloadId],
+    queryFn: async () =>
+      (await api.get<{ files: ManualImportFile[] }>('/downloads/manual-import', {
+        params: { service: manualImportItem!.service, downloadId: manualImportItem!.downloadId },
+      })).data,
+    enabled: !!manualImportItem?.downloadId,
+  })
+
+  const submitManualImport = useMutation({
+    mutationFn: (body: { service: 'sonarr' | 'radarr'; files: ManualImportFile[] }) =>
+      api.post('/downloads/manual-import', body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['downloads'] })
+      setManualImportItem(null)
+      setSelectedFiles(new Set())
+    },
+  })
+
+  // Pre-select every candidate file (minus ones with 0-tolerance rejections) once loaded
+  useEffect(() => {
+    if (!manualImportFiles) return
+    setSelectedFiles(new Set(manualImportFiles.files.map((f) => f.id)))
+  }, [manualImportFiles])
 
   const toggleQbitLimit = useMutation({
     mutationFn: () => api.post('/downloads/qbittorrent/toggle-limit'),
@@ -409,6 +456,15 @@ export default function Downloads() {
                     }`}>
                       {item.state === 'importing' ? 'Copying…' : item.state === 'importBlocked' ? 'Blocked' : 'Pending'}
                     </span>
+                    {item.state === 'importBlocked' && (
+                      <button
+                        onClick={() => setManualImportItem(item)}
+                        title="Review the file(s) Radarr/Sonarr found and confirm the import"
+                        className="text-xs px-2 py-0.5 rounded shrink-0 bg-blue-700 hover:bg-blue-600 text-white transition-colors"
+                      >
+                        Manual Import
+                      </button>
+                    )}
                     <button
                       onClick={() => clearImport.mutate({ service: item.service, id: item.id })}
                       disabled={clearImport.isPending}
@@ -623,6 +679,128 @@ export default function Downloads() {
                   Delete + Files
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual import modal */}
+      {manualImportItem && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+          onClick={() => setManualImportItem(null)}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-2xl w-full shadow-2xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-1">
+              <div className="min-w-0">
+                <h3 className="text-white font-semibold truncate">Manual Import</h3>
+                <p className="text-gray-500 text-sm truncate">
+                  {manualImportItem.mediaTitle || manualImportItem.title}
+                </p>
+              </div>
+              <button
+                onClick={() => setManualImportItem(null)}
+                className="text-gray-500 hover:text-white transition-colors shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto mt-4 -mx-2 px-2">
+              {manualImportLoading ? (
+                <div className="space-y-2">
+                  {[...Array(2)].map((_, i) => <div key={i} className="h-16 bg-gray-800/50 rounded-lg animate-pulse" />)}
+                </div>
+              ) : manualImportError ? (
+                <p className="text-red-400 text-sm py-6 text-center">
+                  {(manualImportError as Error).message || 'Failed to load candidate files'}
+                </p>
+              ) : !manualImportFiles?.files.length ? (
+                <p className="text-gray-500 text-sm py-6 text-center">
+                  No candidate files found — the download may have already been cleared or moved.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {manualImportFiles.files.map((f) => {
+                    const matched = manualImportItem.service === 'radarr' ? !!f.movieId : !!(f.seriesId && f.episodeIds.length > 0)
+                    const checked = selectedFiles.has(f.id)
+                    return (
+                      <label
+                        key={f.id}
+                        className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                          checked ? 'bg-gray-800/60 border-gray-700' : 'bg-gray-900 border-gray-800'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setSelectedFiles((prev) => {
+                            const next = new Set(prev)
+                            next.has(f.id) ? next.delete(f.id) : next.add(f.id)
+                            return next
+                          })}
+                          className="mt-1 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-white truncate" title={f.name}>{f.name}</p>
+                          <div className="flex items-center gap-2 flex-wrap mt-1">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-300">{f.qualityName}</span>
+                            {f.releaseGroup && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{f.releaseGroup}</span>
+                            )}
+                            {f.size > 0 && <span className="text-xs text-gray-600">{formatBytes(f.size)}</span>}
+                            {manualImportItem.service === 'sonarr' && f.episodeLabels.length > 0 && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300">
+                                {f.episodeLabels.join(', ')}
+                              </span>
+                            )}
+                            {!matched && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/50 text-red-300">
+                                No {manualImportItem.service === 'radarr' ? 'movie' : 'episode'} match
+                              </span>
+                            )}
+                          </div>
+                          {f.rejections.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {f.rejections.map((r, i) => (
+                                <p key={i} className="text-xs text-amber-400">⚠ {r}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {submitManualImport.isError && (
+              <p className="text-xs text-red-400 mt-3">
+                {(submitManualImport.error as Error)?.message || 'Import failed'}
+              </p>
+            )}
+
+            <div className="flex gap-2 justify-end flex-wrap mt-4 pt-4 border-t border-gray-800">
+              <button
+                onClick={() => setManualImportItem(null)}
+                className="text-sm px-4 py-2 rounded bg-gray-800 text-gray-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const files = (manualImportFiles?.files ?? []).filter((f) => selectedFiles.has(f.id))
+                  if (files.length > 0) submitManualImport.mutate({ service: manualImportItem.service, files })
+                }}
+                disabled={submitManualImport.isPending || selectedFiles.size === 0}
+                className="text-sm px-4 py-2 rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
+              >
+                {submitManualImport.isPending ? 'Importing…' : `Import ${selectedFiles.size || ''} file${selectedFiles.size === 1 ? '' : 's'}`}
+              </button>
             </div>
           </div>
         </div>

@@ -371,6 +371,91 @@ export default async function downloadsRoutes(fastify) {
     }
   })
 
+  // List candidate files Radarr/Sonarr found for a stuck (importBlocked) download,
+  // so the user can confirm the match instead of switching to the arr's own UI.
+  fastify.get('/manual-import', async (request, reply) => {
+    const config = await getConfig()
+    const { service, downloadId } = request.query
+    if (!service || !downloadId) return reply.status(400).send({ error: 'service and downloadId required' })
+
+    const svc = config.services[service]
+    if (!svc?.enabled) return reply.status(400).send({ error: `${service} not enabled` })
+
+    try {
+      const url = svc.url.replace(/\/$/, '')
+      const res = await fetch(
+        `${url}/api/v3/manualimport?downloadId=${encodeURIComponent(downloadId)}&filterExistingFiles=true`,
+        { headers: { 'X-Api-Key': svc.apiKey }, signal: AbortSignal.timeout(10000) }
+      )
+      if (!res.ok) return reply.status(502).send({ error: `HTTP ${res.status}` })
+      const data = await res.json()
+
+      const files = (Array.isArray(data) ? data : []).map((f) => ({
+        id: f.id,
+        path: f.path,
+        name: f.name,
+        size: f.size || 0,
+        quality: f.quality,
+        qualityName: f.quality?.quality?.name || 'Unknown',
+        releaseGroup: f.releaseGroup || null,
+        languages: f.languages || [],
+        indexerFlags: f.indexerFlags || 0,
+        downloadId: f.downloadId || downloadId,
+        rejections: (f.rejections || []).map((r) => r.reason || String(r)),
+        movieId: f.movie?.id ?? null,
+        movieTitle: f.movie?.title ?? null,
+        seriesId: f.series?.id ?? null,
+        seriesTitle: f.series?.title ?? null,
+        episodeIds: (f.episodes || []).map((e) => e.id),
+        episodeLabels: (f.episodes || []).map(
+          (e) => `S${String(e.seasonNumber).padStart(2, '0')}E${String(e.episodeNumber).padStart(2, '0')}`
+        ),
+      }))
+      return { files }
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  // Submit the confirmed file → movie/episode matches back to Radarr/Sonarr.
+  fastify.post('/manual-import', async (request, reply) => {
+    const config = await getConfig()
+    const { service, files } = request.body ?? {}
+    if (!service || !Array.isArray(files) || files.length === 0)
+      return reply.status(400).send({ error: 'service and files required' })
+
+    const svc = config.services[service]
+    if (!svc?.enabled) return reply.status(400).send({ error: `${service} not enabled` })
+
+    const payloadFiles = files.map((f) => {
+      const base = {
+        path: f.path,
+        quality: f.quality,
+        releaseGroup: f.releaseGroup,
+        languages: f.languages,
+        indexerFlags: f.indexerFlags,
+        downloadId: f.downloadId,
+      }
+      if (service === 'radarr') base.movieId = f.movieId
+      else { base.seriesId = f.seriesId; base.episodeIds = f.episodeIds }
+      return base
+    })
+
+    try {
+      const url = svc.url.replace(/\/$/, '')
+      const res = await fetch(`${url}/api/v3/command`, {
+        method: 'POST',
+        headers: { 'X-Api-Key': svc.apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'ManualImport', files: payloadFiles, importMode: 'auto' }),
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) return reply.status(502).send({ ok: false, error: `HTTP ${res.status}` })
+      return { ok: true }
+    } catch (err) {
+      return reply.status(502).send({ ok: false, error: err.message })
+    }
+  })
+
   fastify.post('/nzbget/set-limit', async (request, reply) => {
     const config = await getConfig()
     const svc = config.services.nzbget
