@@ -21,6 +21,7 @@ interface DownloadItem {
 
 interface ImportingItem {
   id: string
+  groupIds: string[]   // all underlying queue record ids sharing this download (season packs etc.)
   service: 'sonarr' | 'radarr'
   mediaTitle: string | null
   title: string
@@ -246,7 +247,7 @@ export default function Downloads() {
   })
 
   const clearImport = useMutation({
-    mutationFn: (body: { service: 'sonarr' | 'radarr'; id: string }) =>
+    mutationFn: (body: { service: 'sonarr' | 'radarr'; ids: string[] }) =>
       api.post('/downloads/clear-import', body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
@@ -401,7 +402,7 @@ export default function Downloads() {
                 <button
                   onClick={() => {
                     for (const item of data.importing) {
-                      clearImport.mutate({ service: item.service, id: item.id })
+                      clearImport.mutate({ service: item.service, ids: item.groupIds })
                     }
                   }}
                   disabled={clearImport.isPending}
@@ -466,7 +467,7 @@ export default function Downloads() {
                       </button>
                     )}
                     <button
-                      onClick={() => clearImport.mutate({ service: item.service, id: item.id })}
+                      onClick={() => clearImport.mutate({ service: item.service, ids: item.groupIds })}
                       disabled={clearImport.isPending}
                       title="Remove from Sonarr/Radarr queue and download client (use if the file already imported but is stuck)"
                       className="text-xs px-2 py-0.5 rounded shrink-0 bg-gray-800 hover:bg-red-800 text-gray-400 hover:text-white transition-colors disabled:opacity-50"

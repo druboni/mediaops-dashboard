@@ -118,41 +118,59 @@ async function getArrQueue(url, apiKey, service) {
     // identify which seeding torrents Sonarr/Radarr is still tracking.
     const allHashes = new Set(records.map((r) => r.downloadId).filter(Boolean))
 
-    const importing = records
-      .filter((r) => {
-        const state = r.trackedDownloadState
-        // importBlocked = finished downloading but Radarr/Sonarr can't auto-import
-        // (e.g. ambiguous release match) — needs the same visibility as active imports.
-        return state === 'importPending' || state === 'importing' || state === 'importBlocked'
-      })
-      .map((r) => {
-        let title = r.title || 'Unknown'
-        let mediaTitle = null
-        if (service === 'sonarr') {
-          const series = r.series?.title || null
-          const ep = r.episode
-          if (ep) {
-            const code = `S${String(ep.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`
-            title = ep.title ? `${code} – ${ep.title}` : code
-          }
-          mediaTitle = series
-        } else {
-          mediaTitle = r.movie?.title || r.title || null
-          title = mediaTitle || title
+    const blockedRecords = records.filter((r) => {
+      const state = r.trackedDownloadState
+      // importBlocked = finished downloading but Radarr/Sonarr can't auto-import
+      // (e.g. ambiguous release match) — needs the same visibility as active imports.
+      return state === 'importPending' || state === 'importing' || state === 'importBlocked'
+    })
+
+    // A season-pack file gets one Sonarr queue record PER EPISODE even though it's
+    // one download — group by downloadId so the UI shows one row, not a dozen.
+    const groups = new Map() // downloadId (or record id if none) -> records[]
+    for (const r of blockedRecords) {
+      const key = r.downloadId || `solo-${r.id}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(r)
+    }
+
+    const importing = Array.from(groups.values()).map((group) => {
+      const r = group[0]
+      let title = r.title || 'Unknown'
+      let mediaTitle = null
+      if (service === 'sonarr') {
+        mediaTitle = r.series?.title || null
+        if (group.length > 1) {
+          const eps = group
+            .map((g) => g.episode)
+            .filter(Boolean)
+            .sort((a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber)
+          const seasons = [...new Set(eps.map((e) => e.seasonNumber))]
+          title = seasons.length === 1
+            ? `Season ${seasons[0]} (${group.length} episodes)`
+            : `${group.length} episodes across ${seasons.length} seasons`
+        } else if (r.episode) {
+          const code = `S${String(r.episode.seasonNumber).padStart(2, '0')}E${String(r.episode.episodeNumber).padStart(2, '0')}`
+          title = r.episode.title ? `${code} – ${r.episode.title}` : code
         }
-        return {
-          id: String(r.id),
-          service,
-          mediaTitle,
-          title,
-          state: r.trackedDownloadState,   // 'importPending' | 'importing' | 'importBlocked'
-          downloadClient: r.downloadClient || null,
-          downloadId: r.downloadId || null, // torrent hash for qBittorrent
-          protocol: r.protocol || null,    // 'torrent' | 'usenet'
-          size: r.size || 0,
-          statusMessages: (r.statusMessages || []).flatMap((s) => s.messages || []),
-        }
-      })
+      } else {
+        mediaTitle = r.movie?.title || r.title || null
+        title = mediaTitle || title
+      }
+      return {
+        id: String(r.id),
+        groupIds: group.map((g) => String(g.id)), // all underlying queue record ids (for Clear)
+        service,
+        mediaTitle,
+        title,
+        state: r.trackedDownloadState,   // 'importPending' | 'importing' | 'importBlocked'
+        downloadClient: r.downloadClient || null,
+        downloadId: r.downloadId || null, // torrent hash for qBittorrent
+        protocol: r.protocol || null,    // 'torrent' | 'usenet'
+        size: r.size || 0,
+        statusMessages: (r.statusMessages || []).flatMap((s) => s.messages || []),
+      }
+    })
 
     return { importing, allHashes }
   } catch {
@@ -346,25 +364,32 @@ export default async function downloadsRoutes(fastify) {
 
   fastify.post('/clear-import', async (request, reply) => {
     const config = await getConfig()
-    const { service, id, removeFromClient = true } = request.body
-    if (!service || !id) return reply.status(400).send({ error: 'service and id required' })
+    const { service, id, ids, removeFromClient = true } = request.body
+    // A season-pack item groups multiple Sonarr queue records under one download —
+    // `ids` clears all of them; `id` alone still works for a single-record item.
+    const targetIds = Array.isArray(ids) && ids.length > 0 ? ids : (id ? [id] : [])
+    if (!service || targetIds.length === 0) return reply.status(400).send({ error: 'service and id/ids required' })
 
     const svc = config.services[service]
     if (!svc?.enabled) return reply.status(400).send({ error: `${service} not enabled` })
 
+    const url = svc.url.replace(/\/$/, '')
     try {
-      const url = svc.url.replace(/\/$/, '')
-      const params = new URLSearchParams({
-        removeFromClient: String(removeFromClient),
-        blocklist: 'false',
-        skipRedownload: 'true',
-      })
-      const res = await fetch(`${url}/api/v3/queue/${id}?${params}`, {
-        method: 'DELETE',
-        headers: { 'X-Api-Key': svc.apiKey },
-        signal: AbortSignal.timeout(8000),
-      })
-      if (!res.ok && res.status !== 404) return reply.status(502).send({ ok: false, error: `HTTP ${res.status}` })
+      // Only the first delete needs to touch the download client — later ones
+      // for the same downloadId would just fail against an already-removed item.
+      for (let i = 0; i < targetIds.length; i++) {
+        const params = new URLSearchParams({
+          removeFromClient: String(i === 0 ? removeFromClient : false),
+          blocklist: 'false',
+          skipRedownload: 'true',
+        })
+        const res = await fetch(`${url}/api/v3/queue/${targetIds[i]}?${params}`, {
+          method: 'DELETE',
+          headers: { 'X-Api-Key': svc.apiKey },
+          signal: AbortSignal.timeout(8000),
+        })
+        if (!res.ok && res.status !== 404) return reply.status(502).send({ ok: false, error: `HTTP ${res.status}` })
+      }
       return { ok: true }
     } catch (err) {
       return reply.status(502).send({ ok: false, error: err.message })
