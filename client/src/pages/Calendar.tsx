@@ -54,10 +54,13 @@ interface RadarrMovie {
 }
 
 type CalendarRange = 7 | 14 | 30
+type ViewMode = 'list' | 'month'
 type ReleaseType = 'Cinema' | 'Digital' | 'Physical'
 type CalendarItem =
   | { kind: 'episode'; date: string; data: SonarrEpisode }
   | { kind: 'movie';   date: string; releaseType: ReleaseType; data: RadarrMovie }
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -72,6 +75,18 @@ function dayLabel(dateStr: string) {
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow'
   return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+function getMonthGridDays(monthCursor: Date): Date[] {
+  const year = monthCursor.getFullYear()
+  const month = monthCursor.getMonth()
+  const firstOfMonth = new Date(year, month, 1)
+  const gridStart = new Date(year, month, 1 - firstOfMonth.getDay())
+  return Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(gridStart)
+    d.setDate(gridStart.getDate() + i)
+    return d
+  })
 }
 
 // ── Row components ─────────────────────────────────────────────────────────
@@ -130,6 +145,56 @@ function MovieRow({ movie, releaseType }: { movie: RadarrMovie; releaseType: Rel
   )
 }
 
+function chipBorderColor(item: CalendarItem) {
+  if (item.kind === 'episode') return item.data.hasFile ? 'border-l-green-500' : 'border-l-emerald-700'
+  if (item.releaseType === 'Cinema') return 'border-l-yellow-500'
+  if (item.releaseType === 'Digital') return 'border-l-purple-500'
+  return 'border-l-gray-500'
+}
+
+function chipLabel(item: CalendarItem) {
+  if (item.kind === 'episode') {
+    const ep = item.data
+    const show = ep.series?.title || 'Unknown Series'
+    return `${show} · S${String(ep.seasonNumber ?? 0).padStart(2, '0')}E${String(ep.episodeNumber ?? 0).padStart(2, '0')}`
+  }
+  return `${item.data.title}${item.data.year ? ` (${item.data.year})` : ''}`
+}
+
+function MonthDayCell({ date, isCurrentMonth, isToday, items }: {
+  date: Date
+  isCurrentMonth: boolean
+  isToday: boolean
+  items: CalendarItem[]
+}) {
+  return (
+    <div className={`border-r border-b border-gray-800 last:border-r-0 p-1.5 min-h-[92px] ${
+      isCurrentMonth ? 'bg-gray-950' : 'bg-gray-950/40'
+    }`}>
+      <div className={`text-xs mb-1 inline-flex items-center justify-center ${
+        isToday
+          ? 'w-5 h-5 rounded-full bg-blue-600 text-white font-semibold'
+          : isCurrentMonth ? 'text-gray-300' : 'text-gray-700'
+      }`}>
+        {date.getDate()}
+      </div>
+      <div className="space-y-0.5">
+        {items.map((item, i) => (
+          <div
+            key={i}
+            title={chipLabel(item)}
+            className={`text-[10px] leading-tight truncate border-l-2 pl-1 ${chipBorderColor(item)} ${
+              isCurrentMonth ? 'text-gray-300' : 'text-gray-600'
+            }`}
+          >
+            {chipLabel(item)}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function Calendar() {
@@ -141,11 +206,18 @@ function CalendarInner() {
   const hasSonarr = enabledServices.includes('sonarr')
   const hasRadarr = enabledServices.includes('radarr')
   const [range, setRange] = useState<CalendarRange>(14)
+  const [view, setView] = useState<ViewMode>('month')
 
   const today = new Date(); today.setHours(0, 0, 0, 0)
-  const startStr = toLocalDateStr(today)
-  const endDate = new Date(today); endDate.setDate(today.getDate() + range)
-  const endStr = toLocalDateStr(endDate)
+  const [monthCursor, setMonthCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
+  const gridDays = useMemo(() => getMonthGridDays(monthCursor), [monthCursor])
+
+  const listStartStr = toLocalDateStr(today)
+  const listEndDate = new Date(today); listEndDate.setDate(today.getDate() + range)
+  const listEndStr = toLocalDateStr(listEndDate)
+
+  const startStr = view === 'month' ? toLocalDateStr(gridDays[0]) : listStartStr
+  const endStr = view === 'month' ? toLocalDateStr(gridDays[gridDays.length - 1]) : listEndStr
 
   const { data: seriesList = [], isLoading: seriesLoading } = useQuery<SonarrSeries[]>({
     queryKey: ['sonarr-series'],
@@ -208,8 +280,11 @@ function CalendarInner() {
       .map(([date, items]) => ({ date, items }))
   }, [episodes, movies, seriesMap, startStr, endStr])
 
+  const groupedMap = useMemo(() => new Map(grouped.map((g) => [g.date, g.items])), [grouped])
   const isLoading = (hasSonarr && (epLoading || seriesLoading)) || (hasRadarr && movLoading)
   const totalItems = grouped.reduce((n, g) => n + g.items.length, 0)
+  const todayStr = toLocalDateStr(today)
+  const monthLabel = monthCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
   if (!hasSonarr && !hasRadarr) {
     return (
@@ -221,31 +296,104 @@ function CalendarInner() {
   }
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className={view === 'month' ? 'p-6' : 'p-6 max-w-4xl'}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-white">Calendar</h1>
           {!isLoading && totalItems > 0 && (
             <span className="text-xs text-gray-600">{totalItems} release{totalItems !== 1 ? 's' : ''}</span>
           )}
         </div>
-        <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
-          {([7, 14, 30] as CalendarRange[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={`px-3 py-1.5 transition-colors ${
-                range === r ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
-              }`}
-            >
-              {r === 7 ? '1 Week' : r === 14 ? '2 Weeks' : '1 Month'}
-            </button>
-          ))}
+
+        <div className="flex items-center gap-3">
+          {view === 'month' ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMonthCursor((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                aria-label="Previous month"
+              >
+                ‹
+              </button>
+              <span className="text-sm font-medium text-gray-200 w-36 text-center">{monthLabel}</span>
+              <button
+                onClick={() => setMonthCursor((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                aria-label="Next month"
+              >
+                ›
+              </button>
+              <button
+                onClick={() => setMonthCursor(new Date(today.getFullYear(), today.getMonth(), 1))}
+                className="px-2.5 py-1 rounded-md border border-gray-700 text-xs text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+              >
+                Today
+              </button>
+            </div>
+          ) : (
+            <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
+              {([7, 14, 30] as CalendarRange[]).map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setRange(r)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    range === r ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {r === 7 ? '1 Week' : r === 14 ? '2 Weeks' : '1 Month'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
+            {(['month', 'list'] as ViewMode[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`px-3 py-1.5 capitalize transition-colors ${
+                  view === v ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {isLoading ? (
+      {view === 'month' ? (
+        isLoading ? (
+          <div className="grid grid-cols-7 gap-px bg-gray-800 border border-gray-800 rounded-lg overflow-hidden">
+            {[...Array(42)].map((_, i) => <div key={i} className="h-[92px] bg-gray-950 animate-pulse" />)}
+          </div>
+        ) : (
+          <div className="border border-gray-800 rounded-lg overflow-hidden">
+            <div className="grid grid-cols-7 bg-gray-900 border-b border-gray-800">
+              {WEEKDAY_LABELS.map((w) => (
+                <div key={w} className="px-2 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wider text-center">
+                  {w}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7">
+              {gridDays.map((date) => {
+                const dateStr = toLocalDateStr(date)
+                return (
+                  <MonthDayCell
+                    key={dateStr}
+                    date={date}
+                    isCurrentMonth={date.getMonth() === monthCursor.getMonth()}
+                    isToday={dateStr === todayStr}
+                    items={groupedMap.get(dateStr) ?? []}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        )
+      ) : isLoading ? (
         <div className="space-y-4">
           {[...Array(6)].map((_, i) => <div key={i} className="h-16 bg-gray-900 rounded-lg animate-pulse" />)}
         </div>
