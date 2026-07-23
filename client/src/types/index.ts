@@ -26,7 +26,7 @@ export interface QuickLink {
 
 export interface NotificationsConfig {
   discordWebhookUrl: string
-  plexAddedEnabled: boolean
+  mediaAddedEnabled: boolean
   webhookSecret: string
 }
 

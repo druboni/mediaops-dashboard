@@ -14,7 +14,7 @@ const DEFAULT_CONFIG = {
   autoDeleteAfterImport: false,
   notifications: {
     discordWebhookUrl: '',
-    plexAddedEnabled: false,
+    mediaAddedEnabled: false,
     webhookSecret: '',
   },
   services: {

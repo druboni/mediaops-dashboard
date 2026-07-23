@@ -56,7 +56,7 @@ export default function Settings() {
   const [newLink, setNewLink] = useState<{ label: string; url: string }>({ label: '', url: '' })
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [notifications, setNotifications] = useState<NotificationsConfig>({
-    discordWebhookUrl: '', plexAddedEnabled: false, webhookSecret: '',
+    discordWebhookUrl: '', mediaAddedEnabled: false, webhookSecret: '',
   })
   const [discordTestStatus, setDiscordTestStatus] = useState<TestStatus>('idle')
   const [discordTestError, setDiscordTestError] = useState('')
@@ -290,20 +290,20 @@ export default function Settings() {
       {/* Notifications */}
       <section className="mt-10 pt-8 border-t border-gray-800">
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Notifications</h2>
-        <p className="text-xs text-gray-600 mb-4">Post to a Discord channel whenever Plex adds new media</p>
+        <p className="text-xs text-gray-600 mb-4">Post to a Discord channel whenever Sonarr or Radarr imports new media</p>
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-white font-medium mb-0.5">Notify on Plex library additions</p>
-              <p className="text-xs text-gray-500">Requires Plex Pass — Plex calls the receiver URL below directly</p>
+              <p className="text-sm text-white font-medium mb-0.5">Notify on new imports</p>
+              <p className="text-xs text-gray-500">Fires from Sonarr/Radarr's own webhook — works independently of Plex</p>
             </div>
             <Toggle
-              enabled={notifications.plexAddedEnabled}
-              onChange={(v) => setNotifications((p) => ({ ...p, plexAddedEnabled: v }))}
+              enabled={notifications.mediaAddedEnabled}
+              onChange={(v) => setNotifications((p) => ({ ...p, mediaAddedEnabled: v }))}
             />
           </div>
 
-          {notifications.plexAddedEnabled && (
+          {notifications.mediaAddedEnabled && (
             <>
               <div className="flex gap-2">
                 <input
@@ -331,10 +331,11 @@ export default function Settings() {
               {notifications.webhookSecret && (
                 <div>
                   <p className="text-xs text-gray-500 mb-1">
-                    Paste this into Plex → Settings → Webhooks → Add Webhook:
+                    Add this as a Webhook connection in both Sonarr and Radarr
+                    (Settings → Connect → + → Webhook, trigger "On Import"):
                   </p>
                   <code className="block text-xs bg-black/40 border border-gray-800 rounded px-2 py-1.5 text-gray-300 break-all">
-                    {window.location.origin}/api/webhooks/plex/{notifications.webhookSecret}
+                    {window.location.origin}/api/webhooks/media/{notifications.webhookSecret}
                   </code>
                 </div>
               )}
