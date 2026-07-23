@@ -42,9 +42,16 @@ export default async function webhookRoutes(fastify) {
     if (request.params.secret !== notif.webhookSecret) return reply.status(404).send()
     if (!notif.plexAddedEnabled || !notif.discordWebhookUrl) return reply.status(200).send()
 
+    // Plex's own webhook client sometimes sends the "payload" part with a filename
+    // attribute, which makes busboy classify it as type "file" instead of "field" —
+    // accept either shape, and drain any other file parts (e.g. "thumb") we skip.
     let payloadJson = null
     for await (const part of request.parts()) {
-      if (part.type === 'field' && part.fieldname === 'payload') payloadJson = part.value
+      if (part.fieldname !== 'payload') {
+        if (part.file) part.file.resume()
+        continue
+      }
+      payloadJson = part.type === 'file' ? (await part.toBuffer()).toString('utf8') : part.value
     }
     if (!payloadJson) return reply.status(400).send()
 
