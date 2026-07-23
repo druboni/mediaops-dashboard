@@ -32,6 +32,12 @@ function discordPayloadFor(metadata) {
 export default async function webhookRoutes(fastify) {
   await fastify.register(multipart)
 
+  fastify.addHook('onRequest', async (request) => {
+    if (request.url.startsWith('/plex/')) {
+      fastify.log.error({ headers: request.headers }, 'DEBUG: raw plex webhook request headers')
+    }
+  })
+
   // Plex POSTs multipart/form-data with a "payload" field (JSON string) to this URL.
   // No JWT here — Plex Media Server can't authenticate with our app; the random
   // secret in the path is what keeps this endpoint from being guessable.
