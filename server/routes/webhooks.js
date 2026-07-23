@@ -46,14 +46,24 @@ export default async function webhookRoutes(fastify) {
     // attribute, which makes busboy classify it as type "file" instead of "field" —
     // accept either shape, and drain any other file parts (e.g. "thumb") we skip.
     let payloadJson = null
-    for await (const part of request.parts()) {
-      if (part.fieldname !== 'payload') {
-        if (part.file) part.file.resume()
-        continue
+    const seenParts = []
+    try {
+      for await (const part of request.parts()) {
+        seenParts.push({ fieldname: part.fieldname, type: part.type, mimetype: part.mimetype })
+        if (part.fieldname !== 'payload') {
+          if (part.file) part.file.resume()
+          continue
+        }
+        payloadJson = part.type === 'file' ? (await part.toBuffer()).toString('utf8') : part.value
       }
-      payloadJson = part.type === 'file' ? (await part.toBuffer()).toString('utf8') : part.value
+    } catch (err) {
+      fastify.log.error({ err, contentType: request.headers['content-type'], seenParts }, 'DEBUG: multipart parse threw')
+      return reply.status(400).send()
     }
-    if (!payloadJson) return reply.status(400).send()
+    if (!payloadJson) {
+      fastify.log.error({ contentType: request.headers['content-type'], seenParts }, 'DEBUG: no payload field found')
+      return reply.status(400).send()
+    }
 
     let event
     try {
