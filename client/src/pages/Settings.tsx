@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useConfig } from '../store/config'
 import { useTheme, THEMES } from '../store/theme'
 import api from '../services/api'
-import type { Config, ServiceName, ServiceConfig, QuickLink } from '../types'
+import type { Config, ServiceName, ServiceConfig, QuickLink, NotificationsConfig } from '../types'
 
 interface ServiceMeta {
   label: string
@@ -55,6 +55,11 @@ export default function Settings() {
   const [links, setLinks] = useState<QuickLink[]>([])
   const [newLink, setNewLink] = useState<{ label: string; url: string }>({ label: '', url: '' })
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
+  const [notifications, setNotifications] = useState<NotificationsConfig>({
+    discordWebhookUrl: '', plexAddedEnabled: false, webhookSecret: '',
+  })
+  const [discordTestStatus, setDiscordTestStatus] = useState<TestStatus>('idle')
+  const [discordTestError, setDiscordTestError] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -71,6 +76,7 @@ export default function Settings() {
     if (config?.links) setLinks(config.links)
     if (typeof config?.autoDeleteAfterImport === 'boolean')
       setAutoDeleteAfterImport(config.autoDeleteAfterImport)
+    if (config?.notifications) setNotifications(config.notifications)
   }, [config])
 
   useEffect(() => {
@@ -103,11 +109,27 @@ export default function Settings() {
     setSaving(true)
     setSaved(false)
     try {
-      await updateConfig({ ...config!, services, links, autoDeleteAfterImport })
+      await updateConfig({ ...config!, services, links, autoDeleteAfterImport, notifications })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const testDiscordWebhook = async () => {
+    setDiscordTestStatus('testing')
+    setDiscordTestError('')
+    try {
+      await api.post('/config/notifications/test-discord', { discordWebhookUrl: notifications.discordWebhookUrl })
+      setDiscordTestStatus('ok')
+    } catch (err: unknown) {
+      setDiscordTestStatus('error')
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined
+      setDiscordTestError(msg || 'Failed to send test notification')
     }
   }
 
@@ -262,6 +284,62 @@ export default function Settings() {
           <div className="shrink-0 mt-0.5">
             <Toggle enabled={autoDeleteAfterImport} onChange={setAutoDeleteAfterImport} />
           </div>
+        </div>
+      </section>
+
+      {/* Notifications */}
+      <section className="mt-10 pt-8 border-t border-gray-800">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Notifications</h2>
+        <p className="text-xs text-gray-600 mb-4">Post to a Discord channel whenever Plex adds new media</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white font-medium mb-0.5">Notify on Plex library additions</p>
+              <p className="text-xs text-gray-500">Requires Plex Pass — Plex calls the receiver URL below directly</p>
+            </div>
+            <Toggle
+              enabled={notifications.plexAddedEnabled}
+              onChange={(v) => setNotifications((p) => ({ ...p, plexAddedEnabled: v }))}
+            />
+          </div>
+
+          {notifications.plexAddedEnabled && (
+            <>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  placeholder="https://discord.com/api/webhooks/..."
+                  value={notifications.discordWebhookUrl}
+                  onChange={(e) => setNotifications((p) => ({ ...p, discordWebhookUrl: e.target.value }))}
+                  className="input flex-1"
+                />
+                <button
+                  onClick={testDiscordWebhook}
+                  disabled={discordTestStatus === 'testing' || !notifications.discordWebhookUrl}
+                  className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                >
+                  {discordTestStatus === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+              </div>
+              {discordTestStatus === 'ok' && (
+                <p className="text-green-400 text-xs">Test message sent — check your Discord channel</p>
+              )}
+              {discordTestStatus === 'error' && (
+                <p className="text-red-400 text-xs">{discordTestError}</p>
+              )}
+
+              {notifications.webhookSecret && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">
+                    Paste this into Plex → Settings → Webhooks → Add Webhook:
+                  </p>
+                  <code className="block text-xs bg-black/40 border border-gray-800 rounded px-2 py-1.5 text-gray-300 break-all">
+                    {window.location.origin}/api/webhooks/plex/{notifications.webhookSecret}
+                  </code>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </section>
 

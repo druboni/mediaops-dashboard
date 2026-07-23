@@ -20,6 +20,7 @@ import wantedRoutes from './routes/wanted.js'
 import historyRoutes from './routes/history.js'
 import statsRoutes from './routes/stats.js'
 import plexRoutes from './routes/plex.js'
+import webhookRoutes from './routes/webhooks.js'
 import { startAutoBackup } from './autoBackup.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -49,6 +50,7 @@ await fastify.register(wantedRoutes,  { prefix: '/api/wanted' })
 await fastify.register(historyRoutes, { prefix: '/api/history' })
 await fastify.register(statsRoutes,   { prefix: '/api/stats' })
 await fastify.register(plexRoutes,    { prefix: '/api/plex' })
+await fastify.register(webhookRoutes, { prefix: '/api/webhooks' })
 
 if (fs.existsSync(distPath)) {
   await fastify.register(staticFiles, {

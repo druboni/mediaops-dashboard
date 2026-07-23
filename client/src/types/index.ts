@@ -24,9 +24,16 @@ export interface QuickLink {
   url: string
 }
 
+export interface NotificationsConfig {
+  discordWebhookUrl: string
+  plexAddedEnabled: boolean
+  webhookSecret: string
+}
+
 export interface Config {
   services: Record<ServiceName, ServiceConfig>
   links?: QuickLink[]
   adminPasswordHash?: string
   autoDeleteAfterImport?: boolean
+  notifications?: NotificationsConfig
 }

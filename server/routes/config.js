@@ -2,6 +2,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { readFile, writeFile, mkdir, readdir, stat } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import { join, dirname } from 'path'
+import { randomBytes } from 'crypto'
 
 const BACKUP_DIR = process.env.BACKUP_DIR || join(dirname(fileURLToPath(import.meta.url)), '../../config/backups')
 
@@ -11,6 +12,11 @@ const CONFIG_PATH = process.env.CONFIG_PATH || join(__dirname, '../../config/con
 const DEFAULT_CONFIG = {
   links: [],
   autoDeleteAfterImport: false,
+  notifications: {
+    discordWebhookUrl: '',
+    plexAddedEnabled: false,
+    webhookSecret: '',
+  },
   services: {
     plex:        { enabled: false, url: '', apiKey: '' },
     sonarr:      { enabled: false, url: '', apiKey: '' },
@@ -29,19 +35,29 @@ const DEFAULT_CONFIG = {
 }
 
 export async function getConfig() {
+  let merged
   try {
     const raw = await readFile(CONFIG_PATH, 'utf8')
     const saved = JSON.parse(raw)
     // Merge with defaults so new top-level fields (e.g. links) and new
     // service entries are present even on configs created before they existed.
-    return {
+    merged = {
       ...structuredClone(DEFAULT_CONFIG),
       ...saved,
+      notifications: { ...DEFAULT_CONFIG.notifications, ...(saved.notifications ?? {}) },
       services: { ...DEFAULT_CONFIG.services, ...(saved.services ?? {}) },
     }
   } catch {
-    return structuredClone(DEFAULT_CONFIG)
+    merged = structuredClone(DEFAULT_CONFIG)
   }
+
+  // Self-heal: generate the webhook secret once so the receiver URL is stable and unguessable.
+  if (!merged.notifications.webhookSecret) {
+    merged.notifications.webhookSecret = randomBytes(16).toString('hex')
+    await saveConfig(merged)
+  }
+
+  return merged
 }
 
 export async function saveConfig(config) {
@@ -62,6 +78,9 @@ export default async function configRoutes(fastify) {
     if (Array.isArray(request.body.links)) updated.links = request.body.links
     if (typeof request.body.autoDeleteAfterImport === 'boolean')
       updated.autoDeleteAfterImport = request.body.autoDeleteAfterImport
+    if (request.body.notifications && typeof request.body.notifications === 'object') {
+      updated.notifications = { ...current.notifications, ...request.body.notifications }
+    }
     await saveConfig(updated)
     return updated
   })
@@ -106,6 +125,31 @@ export default async function configRoutes(fastify) {
       return withStats
     } catch {
       return []
+    }
+  })
+
+  fastify.post('/notifications/test-discord', async (request, reply) => {
+    const { discordWebhookUrl } = request.body || {}
+    if (!discordWebhookUrl) return reply.status(400).send({ error: 'Missing webhook URL' })
+
+    try {
+      const res = await fetch(discordWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          embeds: [{
+            title: 'MediaOps test notification',
+            description: 'If you can see this, the webhook is wired up correctly.',
+            color: 0xe5a00d,
+            timestamp: new Date().toISOString(),
+          }],
+        }),
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!res.ok) return reply.status(502).send({ error: `Discord returned HTTP ${res.status}` })
+      return { ok: true }
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
     }
   })
 
