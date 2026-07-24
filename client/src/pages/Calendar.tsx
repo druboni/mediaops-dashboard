@@ -62,6 +62,41 @@ type CalendarItem =
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+// ── Status coloring ───────────────────────────────────────────────────────
+// Every calendar item (episode or movie release) reduces to one of three
+// states, colored consistently everywhere it appears:
+//   downloaded  → already have the file
+//   upcoming    → release/air date hasn't happened yet
+//   missing     → date has passed and we still don't have the file
+
+type ItemStatus = 'downloaded' | 'upcoming' | 'missing'
+
+const STATUS_STYLES: Record<ItemStatus, {
+  border: string; dot: string; badgeBg: string; badgeText: string; label: string
+}> = {
+  downloaded: { border: 'border-l-green-500',  dot: 'bg-green-500',  badgeBg: 'bg-green-900/40',  badgeText: 'text-green-400',  label: 'Downloaded' },
+  upcoming:   { border: 'border-l-yellow-500', dot: 'bg-yellow-500', badgeBg: 'bg-yellow-900/40', badgeText: 'text-yellow-400', label: 'Not released yet' },
+  missing:    { border: 'border-l-purple-500', dot: 'bg-purple-500', badgeBg: 'bg-purple-900/40', badgeText: 'text-purple-400', label: 'Out, not downloaded' },
+}
+
+function getItemStatus(item: CalendarItem, todayStr: string): ItemStatus {
+  if (item.data.hasFile) return 'downloaded'
+  return item.date > todayStr ? 'upcoming' : 'missing'
+}
+
+function StatusLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-500 mb-4">
+      {(Object.entries(STATUS_STYLES) as [ItemStatus, typeof STATUS_STYLES[ItemStatus]][]).map(([key, s]) => (
+        <div key={key} className="flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+          {s.label}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function toLocalDateStr(d: Date) {
@@ -91,12 +126,14 @@ function getMonthGridDays(monthCursor: Date): Date[] {
 
 // ── Row components ─────────────────────────────────────────────────────────
 
-function EpisodeRow({ ep }: { ep: SonarrEpisode }) {
+function EpisodeRow({ item, todayStr }: { item: Extract<CalendarItem, { kind: 'episode' }>; todayStr: string }) {
+  const ep = item.data
   const showTitle = ep.series?.title || 'Unknown Series'
   const network = ep.series?.network
+  const s = STATUS_STYLES[getItemStatus(item, todayStr)]
   return (
     <div className="px-4 py-3 flex items-center gap-3">
-      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-green-900/60 text-green-300 shrink-0">TV</span>
+      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-sky-900/60 text-sky-300 shrink-0">TV</span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-white truncate">{showTitle}</p>
         <p className="text-xs text-gray-400 truncate">
@@ -108,48 +145,39 @@ function EpisodeRow({ ep }: { ep: SonarrEpisode }) {
         {network && (
           <span className="text-xs text-gray-600 hidden sm:block">{network}</span>
         )}
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-          ep.hasFile ? 'bg-green-900/40 text-green-400' : 'bg-gray-800 text-gray-500'
-        }`}>
-          {ep.hasFile ? 'Downloaded' : 'Expected'}
+        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${s.badgeBg} ${s.badgeText}`}>
+          {s.label}
         </span>
       </div>
     </div>
   )
 }
 
-function MovieRow({ movie, releaseType }: { movie: RadarrMovie; releaseType: ReleaseType }) {
+function MovieRow({ item, todayStr }: { item: Extract<CalendarItem, { kind: 'movie' }>; todayStr: string }) {
+  const movie = item.data
+  const s = STATUS_STYLES[getItemStatus(item, todayStr)]
   return (
     <div className="px-4 py-3 flex items-center gap-3">
-      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-900/60 text-blue-300 shrink-0">Movie</span>
+      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-indigo-900/60 text-indigo-300 shrink-0">Movie</span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-white truncate">
           {movie.title}{movie.year ? ` (${movie.year})` : ''}
         </p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-          releaseType === 'Cinema'  ? 'bg-yellow-900/50 text-yellow-400' :
-          releaseType === 'Digital' ? 'bg-purple-900/50 text-purple-400' :
-                                      'bg-gray-800 text-gray-400'
-        }`}>
-          {releaseType}
+        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-gray-800 text-gray-400">
+          {item.releaseType}
         </span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-          movie.hasFile ? 'bg-green-900/40 text-green-400' : 'bg-gray-800 text-gray-500'
-        }`}>
-          {movie.hasFile ? 'Downloaded' : 'Expected'}
+        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${s.badgeBg} ${s.badgeText}`}>
+          {s.label}
         </span>
       </div>
     </div>
   )
 }
 
-function chipBorderColor(item: CalendarItem) {
-  if (item.kind === 'episode') return item.data.hasFile ? 'border-l-green-500' : 'border-l-emerald-700'
-  if (item.releaseType === 'Cinema') return 'border-l-yellow-500'
-  if (item.releaseType === 'Digital') return 'border-l-purple-500'
-  return 'border-l-gray-500'
+function chipBorderColor(item: CalendarItem, todayStr: string) {
+  return STATUS_STYLES[getItemStatus(item, todayStr)].border
 }
 
 function chipLabel(item: CalendarItem) {
@@ -161,11 +189,12 @@ function chipLabel(item: CalendarItem) {
   return `${item.data.title}${item.data.year ? ` (${item.data.year})` : ''}`
 }
 
-function MonthDayCell({ date, isCurrentMonth, isToday, items }: {
+function MonthDayCell({ date, isCurrentMonth, isToday, items, todayStr }: {
   date: Date
   isCurrentMonth: boolean
   isToday: boolean
   items: CalendarItem[]
+  todayStr: string
 }) {
   return (
     <div className={`border-r border-b border-gray-800 last:border-r-0 p-1.5 min-h-[92px] ${
@@ -183,7 +212,7 @@ function MonthDayCell({ date, isCurrentMonth, isToday, items }: {
           <div
             key={i}
             title={chipLabel(item)}
-            className={`text-[10px] leading-tight truncate border-l-2 pl-1 ${chipBorderColor(item)} ${
+            className={`text-[10px] leading-tight truncate border-l-2 pl-1 ${chipBorderColor(item, todayStr)} ${
               isCurrentMonth ? 'text-gray-300' : 'text-gray-600'
             }`}
           >
@@ -363,6 +392,8 @@ function CalendarInner() {
         </div>
       </div>
 
+      <StatusLegend />
+
       {view === 'month' ? (
         isLoading ? (
           <div className="grid grid-cols-7 gap-px bg-gray-800 border border-gray-800 rounded-lg overflow-hidden">
@@ -387,6 +418,7 @@ function CalendarInner() {
                     isCurrentMonth={date.getMonth() === monthCursor.getMonth()}
                     isToday={dateStr === todayStr}
                     items={groupedMap.get(dateStr) ?? []}
+                    todayStr={todayStr}
                   />
                 )
               })}
@@ -414,8 +446,8 @@ function CalendarInner() {
               <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800/60">
                 {items.map((item, i) =>
                   item.kind === 'episode'
-                    ? <EpisodeRow key={i} ep={item.data} />
-                    : <MovieRow   key={i} movie={item.data} releaseType={item.releaseType} />
+                    ? <EpisodeRow key={i} item={item} todayStr={todayStr} />
+                    : <MovieRow   key={i} item={item} todayStr={todayStr} />
                 )}
               </div>
             </div>
