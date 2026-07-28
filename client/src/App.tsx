@@ -10,6 +10,7 @@ import Movies from './pages/Movies'
 import TVShows from './pages/TVShows'
 import Requests from './pages/Requests'
 import Indexers from './pages/Indexers'
+import ArrManage from './pages/ArrManage'
 import Music from './pages/Music'
 import Subtitles from './pages/Subtitles'
 import Calendar from './pages/Calendar'
@@ -54,6 +55,7 @@ function AppRoutes() {
         <Route path="tv" element={<TVShows />} />
         <Route path="requests" element={<Requests />} />
         <Route path="indexers" element={<Indexers />} />
+        <Route path="arr-manage" element={<ArrManage />} />
         <Route path="music" element={<Music />} />
         <Route path="subtitles" element={<Subtitles />} />
         <Route path="calendar" element={<Calendar />} />
