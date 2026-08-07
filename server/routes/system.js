@@ -1,6 +1,7 @@
 import http from 'http'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
+import { addLog } from '../logBuffer.js'
 
 async function safeFetch(url, timeout = 5000) {
   try {
@@ -115,6 +116,30 @@ function dockerApiGet(path) {
   })
 }
 
+function dockerApiPost(path) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { socketPath: '/var/run/docker.sock', path, method: 'POST', headers: { Host: 'localhost', 'Content-Length': 0 } },
+      (res) => {
+        let raw = ''
+        res.on('data', (chunk) => { raw += chunk })
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) return resolve()
+          let msg = `Docker API HTTP ${res.statusCode}`
+          try {
+            const parsed = JSON.parse(raw)
+            if (parsed.message) msg = parsed.message
+          } catch { /* non-JSON error body */ }
+          reject(new Error(msg))
+        })
+      }
+    )
+    req.setTimeout(20000, () => { req.destroy(new Error('Docker API timeout')) })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 async function getDockerContainers() {
   try {
     const raw = await dockerApiGet('/containers/json?all=1')
@@ -192,6 +217,19 @@ export default async function systemRoutes(fastify) {
         gpu: null,
       },
       containers: containers.status === 'fulfilled' ? containers.value : null,
+    }
+  })
+
+  fastify.post('/containers/:id/restart', async (request, reply) => {
+    const { id } = request.params
+    if (!/^[a-zA-Z0-9_.-]+$/.test(id)) return reply.status(400).send({ error: 'Invalid container id' })
+    try {
+      await dockerApiPost(`/containers/${id}/restart?t=10`)
+      addLog('info', `[system] Restarted container ${id}`, { container: id })
+      return { ok: true }
+    } catch (err) {
+      addLog('error', `[system] Failed to restart container ${id}: ${err.message}`, { container: id, error: err.message })
+      return reply.status(502).send({ error: err.message })
     }
   })
 }

@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 
 interface DiskInfo {
@@ -270,10 +271,31 @@ function ServerCard({ server }: { server: ServerStats }) {
 }
 
 export default function System() {
+  const queryClient = useQueryClient()
   const { data, isLoading, error, dataUpdatedAt } = useQuery<SystemData>({
     queryKey: ['system'],
     queryFn: async () => (await api.get<SystemData>('/system')).data,
     refetchInterval: 15_000,
+  })
+
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
+  const [restartError, setRestartError] = useState<{ id: string; message: string } | null>(null)
+
+  const restartContainer = useMutation({
+    mutationFn: (id: string) => api.post(`/system/containers/${id}/restart`),
+    onSuccess: () => {
+      setConfirmTarget(null)
+      queryClient.invalidateQueries({ queryKey: ['system'] })
+    },
+    onError: (err: unknown, id) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined
+      setConfirmTarget(null)
+      setRestartError({ id, message: msg || 'Restart failed' })
+      setTimeout(() => setRestartError(null), 5000)
+    },
   })
 
   function timeAgo(ts: number) {
@@ -350,12 +372,18 @@ export default function System() {
                     c.state === 'paused'     ? 'bg-yellow-400' :
                     c.state === 'restarting' ? 'bg-blue-400 animate-pulse' :
                                                'bg-red-500'
+                  const isRestarting = restartContainer.isPending && restartContainer.variables === c.id
                   return (
-                    <div key={c.id} className="px-4 py-2.5 flex items-center gap-3">
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stateColor}`} />
+                    <div key={c.id} className="px-4 py-2.5 flex items-center gap-3 group">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRestarting ? 'bg-blue-400 animate-pulse' : stateColor}`} />
                       <div className="flex-1 min-w-0 flex items-center gap-3">
                         <span className="text-sm text-white font-medium truncate">{c.name}</span>
                         <span className="text-xs text-gray-600 truncate hidden sm:block">{c.image}</span>
+                        {restartError?.id === c.id && (
+                          <span className="text-xs text-red-400 truncate" title={restartError.message}>
+                            Restart failed: {restartError.message}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 shrink-0">
                         {c.ports.length > 0 && (
@@ -366,8 +394,33 @@ export default function System() {
                         <span className={`text-xs tabular-nums ${
                           c.state === 'running' ? 'text-gray-500' : 'text-red-400'
                         }`}>
-                          {c.status}
+                          {isRestarting ? 'Restarting…' : c.status}
                         </span>
+                        {confirmTarget === c.id ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => restartContainer.mutate(c.id)}
+                              className="text-xs px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={() => setConfirmTarget(null)}
+                              className="text-xs px-1.5 py-1 rounded bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmTarget(c.id)}
+                            disabled={isRestarting}
+                            title="Restart container"
+                            className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-blue-900/60 text-gray-500 hover:text-blue-300 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                          >
+                            Restart
+                          </button>
+                        )}
                       </div>
                     </div>
                   )
