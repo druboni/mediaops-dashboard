@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir, readdir, stat } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import { join, dirname } from 'path'
 import { randomBytes } from 'crypto'
+import { encryptValue, decryptValue } from '../crypto.js'
 
 const BACKUP_DIR = process.env.BACKUP_DIR || join(dirname(fileURLToPath(import.meta.url)), '../../config/backups')
 
@@ -57,12 +58,37 @@ export async function getConfig() {
     await saveConfig(merged)
   }
 
+  // Callers always get plaintext keys — encryption is purely an at-rest concern,
+  // handled here and in saveConfig so no other route needs to know about it.
+  for (const svc of Object.values(merged.services)) {
+    svc.apiKey = decryptValue(svc.apiKey)
+  }
+
   return merged
 }
 
+// Reads config.json as stored on disk, without decrypting API keys. Used for
+// backups so the exported/backed-up file stays encrypted-at-rest too, instead
+// of dumping every service's plaintext key into a second, less-protected file.
+export async function getRawConfig() {
+  try {
+    const raw = await readFile(CONFIG_PATH, 'utf8')
+    return JSON.parse(raw)
+  } catch {
+    return structuredClone(DEFAULT_CONFIG)
+  }
+}
+
 export async function saveConfig(config) {
+  const toWrite = structuredClone(config)
+  for (const svc of Object.values(toWrite.services)) {
+    // decrypt-then-encrypt normalizes regardless of whether the incoming value is
+    // plaintext (typed in Settings), already our ciphertext (round-tripped from
+    // getConfig), or from a restored backup — always ends up encrypted exactly once.
+    svc.apiKey = encryptValue(decryptValue(svc.apiKey))
+  }
   await mkdir(dirname(CONFIG_PATH), { recursive: true })
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2))
+  await writeFile(CONFIG_PATH, JSON.stringify(toWrite, null, 2))
 }
 
 export default async function configRoutes(fastify) {
@@ -85,9 +111,10 @@ export default async function configRoutes(fastify) {
     return updated
   })
 
-  // Download the full config as a backup file
+  // Download the full config as a backup file (still encrypted-at-rest —
+  // restoring re-normalizes via saveConfig regardless of which instance/key made it)
   fastify.get('/backup', async (request, reply) => {
-    const config = await getConfig()
+    const config = await getRawConfig()
     const stamp = new Date().toISOString().slice(0, 10)
     reply
       .header('Content-Type', 'application/json')

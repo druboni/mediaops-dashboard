@@ -1,7 +1,7 @@
 import { readdir, mkdir, writeFile, unlink, stat } from 'fs/promises'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { getConfig } from './routes/config.js'
+import { getRawConfig } from './routes/config.js'
 import { addLog } from './logBuffer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -39,7 +39,7 @@ async function runBackupIfDue() {
   const age = await latestBackupAge()
   if (age < INTERVAL_MS) return
 
-  const config = await getConfig()
+  const config = await getRawConfig()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const path = join(BACKUP_DIR, `auto-${stamp}.json`)
   await writeFile(path, JSON.stringify(config, null, 2))
