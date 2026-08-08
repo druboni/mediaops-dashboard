@@ -270,6 +270,49 @@ function ServerCard({ server }: { server: ServerStats }) {
   )
 }
 
+function extractErrorMessage(err: unknown): string | undefined {
+  return err && typeof err === 'object' && 'response' in err
+    ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+    : undefined
+}
+
+function LogsModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+  const { data, isLoading, error, refetch, isFetching } = useQuery<{ logs: string }>({
+    queryKey: ['container-logs', id],
+    queryFn: async () => (await api.get<{ logs: string }>(`/system/containers/${id}/logs`, { params: { tail: 300 } })).data,
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 shrink-0">
+          <h3 className="text-white font-semibold">{name} — last 300 lines</h3>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+            >
+              {isFetching ? 'Refreshing…' : 'Refresh'}
+            </button>
+            <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">✕</button>
+          </div>
+        </div>
+        <div className="overflow-y-auto p-4">
+          {isLoading && <p className="text-gray-600 text-sm">Loading…</p>}
+          {error && <p className="text-red-400 text-sm">Failed to load logs: {extractErrorMessage(error) ?? (error as Error).message}</p>}
+          {data && (
+            <pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap break-all">{data.logs || '(no output)'}</pre>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function System() {
   const queryClient = useQueryClient()
   const { data, isLoading, error, dataUpdatedAt } = useQuery<SystemData>({
@@ -288,14 +331,21 @@ export default function System() {
       queryClient.invalidateQueries({ queryKey: ['system'] })
     },
     onError: (err: unknown, id) => {
-      const msg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-          : undefined
       setConfirmTarget(null)
-      setRestartError({ id, message: msg || 'Restart failed' })
+      setRestartError({ id, message: extractErrorMessage(err) || 'Restart failed' })
       setTimeout(() => setRestartError(null), 5000)
     },
+  })
+
+  const [logsTarget, setLogsTarget] = useState<{ id: string; name: string } | null>(null)
+  const [updateResults, setUpdateResults] = useState<Record<string, { updateAvailable: boolean | null; reason?: string }>>({})
+
+  const checkUpdate = useMutation({
+    mutationFn: async (id: string) =>
+      (await api.get<{ updateAvailable: boolean | null; reason?: string }>(`/system/containers/${id}/update-check`)).data,
+    onSuccess: (result, id) => setUpdateResults((prev) => ({ ...prev, [id]: result })),
+    onError: (err: unknown, id) =>
+      setUpdateResults((prev) => ({ ...prev, [id]: { updateAvailable: null, reason: extractErrorMessage(err) || 'Check failed' } })),
   })
 
   function timeAgo(ts: number) {
@@ -379,6 +429,24 @@ export default function System() {
                       <div className="flex-1 min-w-0 flex items-center gap-3">
                         <span className="text-sm text-white font-medium truncate">{c.name}</span>
                         <span className="text-xs text-gray-600 truncate hidden sm:block">{c.image}</span>
+                        {updateResults[c.id]?.updateAvailable === true && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-300 font-medium shrink-0">
+                            Update available
+                          </span>
+                        )}
+                        {updateResults[c.id]?.updateAvailable === false && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/40 text-green-400 font-medium shrink-0">
+                            Up to date
+                          </span>
+                        )}
+                        {updateResults[c.id]?.updateAvailable === null && (
+                          <span
+                            className="text-[10px] text-gray-600 truncate"
+                            title={updateResults[c.id]?.reason}
+                          >
+                            {updateResults[c.id]?.reason}
+                          </span>
+                        )}
                         {restartError?.id === c.id && (
                           <span className="text-xs text-red-400 truncate" title={restartError.message}>
                             Restart failed: {restartError.message}
@@ -396,6 +464,21 @@ export default function System() {
                         }`}>
                           {isRestarting ? 'Restarting…' : c.status}
                         </span>
+                        <button
+                          onClick={() => checkUpdate.mutate(c.id)}
+                          disabled={checkUpdate.isPending && checkUpdate.variables === c.id}
+                          title="Check for a newer image on the registry"
+                          className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                        >
+                          {checkUpdate.isPending && checkUpdate.variables === c.id ? '…' : 'Check update'}
+                        </button>
+                        <button
+                          onClick={() => setLogsTarget({ id: c.id, name: c.name })}
+                          title="View recent logs"
+                          className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          Logs
+                        </button>
                         {confirmTarget === c.id ? (
                           <div className="flex items-center gap-1">
                             <button
@@ -429,6 +512,10 @@ export default function System() {
             </section>
           )}
         </>
+      )}
+
+      {logsTarget && (
+        <LogsModal id={logsTarget.id} name={logsTarget.name} onClose={() => setLogsTarget(null)} />
       )}
     </div>
   )

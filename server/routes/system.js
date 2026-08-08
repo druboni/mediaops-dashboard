@@ -140,6 +140,45 @@ function dockerApiPost(path) {
   })
 }
 
+function dockerApiGetRaw(path) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(
+      { socketPath: '/var/run/docker.sock', path, headers: { Host: 'localhost' } },
+      (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) return resolve(Buffer.concat(chunks))
+          reject(new Error(`Docker API HTTP ${res.statusCode}`))
+        })
+      }
+    )
+    req.setTimeout(10000, () => { req.destroy(new Error('Docker API timeout')) })
+    req.on('error', reject)
+  })
+}
+
+// Docker multiplexes stdout/stderr into 8-byte-header frames unless the
+// container was started with a TTY, in which case the body is already plain
+// text. Returns null (rather than throwing) if the buffer doesn't parse as
+// framed data, so the caller can fall back to raw text.
+function demuxDockerLogs(buf) {
+  const lines = []
+  let offset = 0
+  while (offset + 8 <= buf.length) {
+    const streamType = buf.readUInt8(offset)
+    const size = buf.readUInt32BE(offset + 4)
+    const start = offset + 8
+    const end = start + size
+    if (streamType > 2 || end > buf.length) return null
+    lines.push(buf.subarray(start, end).toString('utf8'))
+    offset = end
+  }
+  return offset === buf.length ? lines.join('') : null
+}
+
+const ANSI_RE = /\x1b\[[0-9;]*m/g
+
 async function getDockerContainers() {
   try {
     const raw = await dockerApiGet('/containers/json?all=1')
@@ -175,6 +214,60 @@ async function getGpu(host) {
     const d = await res.json()
     return d.error ? null : d
   } catch { return null }
+}
+
+// Splits an image reference like "lscr.io/linuxserver/radarr:latest" or
+// "portainer/portainer-ce:latest" or "alpine" into a registry API host, repo
+// path, and tag — following the same "does the first segment look like a
+// hostname" heuristic Docker itself uses to decide whether a ref is on Docker
+// Hub (implicit, no host segment) or some other registry.
+function parseImageRef(ref) {
+  let rest = ref.split('@')[0] // drop any @sha256:... digest suffix
+  const lastSlash = rest.lastIndexOf('/')
+  const lastColon = rest.lastIndexOf(':')
+  let tag = 'latest'
+  if (lastColon > lastSlash) {
+    tag = rest.slice(lastColon + 1)
+    rest = rest.slice(0, lastColon)
+  }
+  const firstSeg = rest.split('/')[0]
+  const isRegistryHost = firstSeg.includes('.') || firstSeg.includes(':') || firstSeg === 'localhost'
+  if (isRegistryHost) {
+    return { host: firstSeg, repo: rest.slice(firstSeg.length + 1), tag }
+  }
+  return { host: 'registry-1.docker.io', repo: rest.includes('/') ? rest : `library/${rest}`, tag }
+}
+
+const MANIFEST_ACCEPT = [
+  'application/vnd.docker.distribution.manifest.list.v2+json',
+  'application/vnd.docker.distribution.manifest.v2+json',
+  'application/vnd.oci.image.index.v1+json',
+  'application/vnd.oci.image.manifest.v1+json',
+].join(', ')
+
+// Discovers the registry's token endpoint from the standard 401 challenge on
+// /v2/ (works for Docker Hub, ghcr.io, and mirrors like lscr.io that delegate
+// to ghcr.io under the hood), then fetches the manifest digest for the tag.
+async function getRemoteDigest(host, repo, tag) {
+  const pingRes = await fetch(`https://${host}/v2/`, { signal: AbortSignal.timeout(8000) })
+  const challenge = pingRes.headers.get('www-authenticate') || ''
+  const realmMatch = challenge.match(/realm="([^"]+)"/)
+  if (!realmMatch) throw new Error(`${host} does not support registry token auth discovery`)
+  const serviceMatch = challenge.match(/service="([^"]+)"/)
+  const tokenUrl = `${realmMatch[1]}?service=${encodeURIComponent(serviceMatch?.[1] ?? '')}&scope=${encodeURIComponent(`repository:${repo}:pull`)}`
+
+  const tokenRes = await fetch(tokenUrl, { signal: AbortSignal.timeout(8000) })
+  if (!tokenRes.ok) throw new Error(`Registry token request failed: HTTP ${tokenRes.status}`)
+  const { token } = await tokenRes.json()
+
+  const manifestRes = await fetch(`https://${host}/v2/${repo}/manifests/${tag}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: MANIFEST_ACCEPT },
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!manifestRes.ok) throw new Error(`Manifest request failed: HTTP ${manifestRes.status}`)
+  const digest = manifestRes.headers.get('docker-content-digest')
+  if (!digest) throw new Error('Registry did not return a content digest')
+  return digest
 }
 
 export default async function systemRoutes(fastify) {
@@ -229,6 +322,43 @@ export default async function systemRoutes(fastify) {
       return { ok: true }
     } catch (err) {
       addLog('error', `[system] Failed to restart container ${id}: ${err.message}`, { container: id, error: err.message })
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  fastify.get('/containers/:id/logs', async (request, reply) => {
+    const { id } = request.params
+    if (!/^[a-zA-Z0-9_.-]+$/.test(id)) return reply.status(400).send({ error: 'Invalid container id' })
+    const tail = Math.min(parseInt(request.query.tail) || 300, 2000)
+    try {
+      const buf = await dockerApiGetRaw(`/containers/${id}/logs?stdout=1&stderr=1&tail=${tail}&timestamps=1`)
+      const text = demuxDockerLogs(buf) ?? buf.toString('utf8')
+      return { logs: text.replace(ANSI_RE, '') }
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  fastify.get('/containers/:id/update-check', async (request, reply) => {
+    const { id } = request.params
+    if (!/^[a-zA-Z0-9_.-]+$/.test(id)) return reply.status(400).send({ error: 'Invalid container id' })
+    try {
+      const info = await dockerApiGet(`/containers/${id}/json`)
+      const imageRef = info?.Config?.Image
+      if (!imageRef) return reply.status(404).send({ error: 'Container not found' })
+
+      const imgInfo = await dockerApiGet(`/images/${encodeURIComponent(info.Image)}/json`)
+      const repoDigests = imgInfo?.RepoDigests ?? []
+      if (repoDigests.length === 0) {
+        return { updateAvailable: null, reason: 'Locally built image — nothing upstream to compare against' }
+      }
+      const localDigest = repoDigests[0].split('@')[1]
+
+      const { host, repo, tag } = parseImageRef(imageRef)
+      const remoteDigest = await getRemoteDigest(host, repo, tag)
+
+      return { updateAvailable: remoteDigest !== localDigest, localDigest, remoteDigest }
+    } catch (err) {
       return reply.status(502).send({ error: err.message })
     }
   })
