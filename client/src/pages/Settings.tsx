@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useConfig } from '../store/config'
 import { useTheme, THEMES } from '../store/theme'
 import api from '../services/api'
-import type { Config, ServiceName, ServiceConfig, QuickLink, NotificationsConfig } from '../types'
+import type { Config, ServiceName, ServiceConfig, QuickLink, NotificationsConfig, ArrInstanceType, ArrInstance } from '../types'
 
 interface ServiceMeta {
   label: string
@@ -54,6 +54,9 @@ export default function Settings() {
   const [showKey, setShowKey] = useState<Partial<Record<ServiceName, boolean>>>({})
   const [links, setLinks] = useState<QuickLink[]>([])
   const [newLink, setNewLink] = useState<{ label: string; url: string }>({ label: '', url: '' })
+  const [additionalInstances, setAdditionalInstances] = useState<Record<ArrInstanceType, ArrInstance[]>>({
+    sonarr: [], radarr: [], lidarr: [],
+  })
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [notifications, setNotifications] = useState<NotificationsConfig>({
     discordWebhookUrl: '', mediaAddedEnabled: false, webhookSecret: '',
@@ -85,6 +88,7 @@ export default function Settings() {
     if (typeof config?.autoDeleteAfterImport === 'boolean')
       setAutoDeleteAfterImport(config.autoDeleteAfterImport)
     if (config?.notifications) setNotifications(config.notifications)
+    if (config?.additionalInstances) setAdditionalInstances(config.additionalInstances)
   }, [config])
 
   useEffect(() => {
@@ -117,7 +121,7 @@ export default function Settings() {
     setSaving(true)
     setSaved(false)
     try {
-      await updateConfig({ ...config!, services, links, autoDeleteAfterImport, notifications })
+      await updateConfig({ ...config!, services, links, autoDeleteAfterImport, notifications, additionalInstances })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } finally {
@@ -289,6 +293,25 @@ export default function Settings() {
           </section>
         ))}
       </div>
+
+      {/* Additional Instances */}
+      <section className="mt-10 pt-8 border-t border-gray-800">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Additional Instances</h2>
+        <p className="text-xs text-gray-600 mb-4">
+          Secondary Sonarr/Radarr/Lidarr instances (e.g. a separate 4K library) — managed from the
+          Sonarr / Radarr / Lidarr page, alongside your primary instance above.
+        </p>
+        <div className="space-y-6">
+          {(['sonarr', 'radarr', 'lidarr'] as ArrInstanceType[]).map((type) => (
+            <InstanceTypeBlock
+              key={type}
+              type={type}
+              instances={additionalInstances[type]}
+              onChange={(next) => setAdditionalInstances((p) => ({ ...p, [type]: next }))}
+            />
+          ))}
+        </div>
+      </section>
 
       {/* Downloads */}
       <section className="mt-10 pt-8 border-t border-gray-800">
@@ -781,5 +804,108 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean
         }`}
       />
     </button>
+  )
+}
+
+const INSTANCE_TYPE_LABEL: Record<ArrInstanceType, string> = { sonarr: 'Sonarr', radarr: 'Radarr', lidarr: 'Lidarr' }
+
+function InstanceTypeBlock({
+  type, instances, onChange,
+}: {
+  type: ArrInstanceType
+  instances: ArrInstance[]
+  onChange: (next: ArrInstance[]) => void
+}) {
+  const [draft, setDraft] = useState<{ name: string; url: string; apiKey: string }>({ name: '', url: '', apiKey: '' })
+  const [testStatus, setTestStatus] = useState<Partial<Record<string, TestStatus>>>({})
+  const [testError, setTestError] = useState<Partial<Record<string, string>>>({})
+
+  const test = async (id: string, url: string, apiKey: string) => {
+    setTestStatus((p) => ({ ...p, [id]: 'testing' }))
+    setTestError((p) => ({ ...p, [id]: '' }))
+    try {
+      await api.post(`/services/${type}/test`, { url, apiKey })
+      setTestStatus((p) => ({ ...p, [id]: 'ok' }))
+    } catch (err: unknown) {
+      setTestStatus((p) => ({ ...p, [id]: 'error' }))
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined
+      setTestError((p) => ({ ...p, [id]: msg || 'Connection failed' }))
+    }
+  }
+
+  const add = () => {
+    if (!draft.name.trim() || !draft.url.trim()) return
+    const id = crypto.randomUUID()
+    onChange([...instances, { id, name: draft.name.trim(), url: draft.url.trim(), apiKey: draft.apiKey.trim() }])
+    setDraft({ name: '', url: '', apiKey: '' })
+  }
+
+  return (
+    <div>
+      <p className="text-sm text-white font-medium mb-2">{INSTANCE_TYPE_LABEL[type]}</p>
+      <div className="space-y-2 mb-3">
+        {instances.map((inst) => (
+          <div key={inst.id} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-white shrink-0">{inst.name}</span>
+              <span className="text-xs text-gray-600 truncate flex-1">{inst.url}</span>
+              {testStatus[inst.id] === 'ok' && <span className="text-green-400 text-xs shrink-0">✓ Connected</span>}
+              <button
+                onClick={() => test(inst.id, inst.url, inst.apiKey)}
+                disabled={testStatus[inst.id] === 'testing'}
+                className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-50 shrink-0"
+              >
+                {testStatus[inst.id] === 'testing' ? '…' : 'Test'}
+              </button>
+              <button
+                onClick={() => onChange(instances.filter((i) => i.id !== inst.id))}
+                className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+            {testStatus[inst.id] === 'error' && (
+              <p className="text-red-400 text-xs mt-1">{testError[inst.id]}</p>
+            )}
+          </div>
+        ))}
+        {instances.length === 0 && (
+          <p className="text-xs text-gray-600 py-1">No additional {INSTANCE_TYPE_LABEL[type]} instances</p>
+        )}
+      </div>
+      <div className="flex gap-2 items-end">
+        <input
+          type="text"
+          placeholder="Name (e.g. Sonarr 4K)"
+          value={draft.name}
+          onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
+          className="input w-40"
+        />
+        <input
+          type="url"
+          placeholder="URL"
+          value={draft.url}
+          onChange={(e) => setDraft((p) => ({ ...p, url: e.target.value }))}
+          className="input flex-1"
+        />
+        <input
+          type="password"
+          placeholder="API Key"
+          value={draft.apiKey}
+          onChange={(e) => setDraft((p) => ({ ...p, apiKey: e.target.value }))}
+          className="input w-40"
+        />
+        <button
+          onClick={add}
+          disabled={!draft.name.trim() || !draft.url.trim()}
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+        >
+          + Add
+        </button>
+      </div>
+    </div>
   )
 }

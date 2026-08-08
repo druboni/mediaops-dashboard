@@ -41,7 +41,17 @@ const DEFAULT_CONFIG = {
     requestrr:   { enabled: false, url: '', apiKey: '' },
     tautulli:    { enabled: false, url: '', apiKey: '' },
   },
+  // Secondary named instances (e.g. a separate 4K Sonarr/Radarr) — additive to
+  // `services` above rather than replacing it, so every other route that reads
+  // config.services.sonarr etc. for the primary instance is unaffected.
+  additionalInstances: {
+    sonarr: [],
+    radarr: [],
+    lidarr: [],
+  },
 }
+
+const INSTANCE_TYPES = ['sonarr', 'radarr', 'lidarr']
 
 export async function getConfig() {
   let merged
@@ -55,6 +65,7 @@ export async function getConfig() {
       ...saved,
       notifications: { ...DEFAULT_CONFIG.notifications, ...(saved.notifications ?? {}) },
       services: { ...DEFAULT_CONFIG.services, ...(saved.services ?? {}) },
+      additionalInstances: { ...structuredClone(DEFAULT_CONFIG.additionalInstances), ...(saved.additionalInstances ?? {}) },
     }
   } catch {
     merged = structuredClone(DEFAULT_CONFIG)
@@ -70,6 +81,11 @@ export async function getConfig() {
   // handled here and in saveConfig so no other route needs to know about it.
   for (const svc of Object.values(merged.services)) {
     svc.apiKey = decryptValue(svc.apiKey)
+  }
+  for (const type of INSTANCE_TYPES) {
+    for (const inst of merged.additionalInstances[type] ?? []) {
+      inst.apiKey = decryptValue(inst.apiKey)
+    }
   }
 
   return merged
@@ -95,6 +111,11 @@ export async function saveConfig(config) {
     // getConfig), or from a restored backup — always ends up encrypted exactly once.
     svc.apiKey = encryptValue(decryptValue(svc.apiKey))
   }
+  for (const type of INSTANCE_TYPES) {
+    for (const inst of toWrite.additionalInstances?.[type] ?? []) {
+      inst.apiKey = encryptValue(decryptValue(inst.apiKey))
+    }
+  }
   await mkdir(dirname(CONFIG_PATH), { recursive: true })
   await writeFile(CONFIG_PATH, JSON.stringify(toWrite, null, 2))
 }
@@ -114,6 +135,9 @@ export default async function configRoutes(fastify) {
       updated.autoDeleteAfterImport = request.body.autoDeleteAfterImport
     if (request.body.notifications && typeof request.body.notifications === 'object') {
       updated.notifications = { ...current.notifications, ...request.body.notifications }
+    }
+    if (request.body.additionalInstances && typeof request.body.additionalInstances === 'object') {
+      updated.additionalInstances = { ...current.additionalInstances, ...request.body.additionalInstances }
     }
     await saveConfig(updated)
     return updated

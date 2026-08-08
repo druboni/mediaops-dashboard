@@ -38,10 +38,20 @@ export interface NotificationsConfig {
   telegramChatId: string
 }
 
+export type ArrInstanceType = 'sonarr' | 'radarr' | 'lidarr'
+
+export interface ArrInstance {
+  id: string
+  name: string
+  url: string
+  apiKey: string
+}
+
 export interface Config {
   services: Record<ServiceName, ServiceConfig>
   links?: QuickLink[]
   adminPasswordHash?: string
   autoDeleteAfterImport?: boolean
   notifications?: NotificationsConfig
+  additionalInstances?: Record<ArrInstanceType, ArrInstance[]>
 }

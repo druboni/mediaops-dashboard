@@ -10,6 +10,15 @@ function apiV(service: ArrService) {
   return service === 'lidarr' ? 'v1' : 'v3'
 }
 
+// Primary instance goes through /proxy/:service/*; a secondary named instance
+// (configured in Settings → Additional Instances) goes through the parallel
+// /proxy/instance/:service/:instanceId/* route added alongside it server-side.
+function arrBase(service: ArrService, instanceId?: string) {
+  return instanceId
+    ? `/proxy/instance/${service}/${instanceId}/api/${apiV(service)}`
+    : `/proxy/${service}/api/${apiV(service)}`
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface ArrField {
@@ -300,16 +309,17 @@ function SchemaPicker({
 // ── Indexer modal (add / edit) ───────────────────────────────────────────────
 
 function IndexerModal({
-  service, tags, initial, onClose, onSaved,
+  service, instanceId, tags, initial, onClose, onSaved,
 }: {
   service: ArrService
+  instanceId?: string
   tags: ArrTag[]
   initial: ArrIndexer
   onClose: () => void
   onSaved: () => void
 }) {
   const [draft, setDraft] = useState<ArrIndexer>(initial)
-  const base = `/proxy/${service}/api/${apiV(service)}/indexer`
+  const base = `${arrBase(service, instanceId)}/indexer`
 
   const save = useMutation({
     mutationFn: (item: ArrIndexer) => (item.id ? api.put(`${base}/${item.id}`, item) : api.post(base, item)),
@@ -387,16 +397,17 @@ function IndexerModal({
 // ── Download client modal (add / edit) ───────────────────────────────────────
 
 function DownloadClientModal({
-  service, tags, initial, onClose, onSaved,
+  service, instanceId, tags, initial, onClose, onSaved,
 }: {
   service: ArrService
+  instanceId?: string
   tags: ArrTag[]
   initial: ArrDownloadClient
   onClose: () => void
   onSaved: () => void
 }) {
   const [draft, setDraft] = useState<ArrDownloadClient>(initial)
-  const base = `/proxy/${service}/api/${apiV(service)}/downloadclient`
+  const base = `${arrBase(service, instanceId)}/downloadclient`
 
   const save = useMutation({
     mutationFn: (item: ArrDownloadClient) => (item.id ? api.put(`${base}/${item.id}`, item) : api.post(base, item)),
@@ -465,9 +476,9 @@ function DownloadClientModal({
 
 // ── Indexer section ──────────────────────────────────────────────────────────
 
-function ArrIndexerSection({ service }: { service: ArrService }) {
+function ArrIndexerSection({ service, instanceId }: { service: ArrService; instanceId?: string }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/${apiV(service)}/indexer`
+  const base = `${arrBase(service, instanceId)}/indexer`
   const [editing, setEditing] = useState<ArrIndexer | null>(null)
   const [pickingSchema, setPickingSchema] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
@@ -475,19 +486,19 @@ function ArrIndexerSection({ service }: { service: ArrService }) {
   const [testAllState, setTestAllState] = useState<'idle' | 'testing' | 'done'>('idle')
 
   const { data: indexers, isLoading } = useQuery<ArrIndexer[]>({
-    queryKey: [service, 'indexers'],
+    queryKey: [service, instanceId, 'indexers'],
     queryFn: async () => (await api.get(base)).data,
     staleTime: 30_000,
   })
 
   const { data: tags } = useQuery<ArrTag[]>({
-    queryKey: [service, 'tags'],
-    queryFn: async () => (await api.get(`/proxy/${service}/api/${apiV(service)}/tag`)).data,
+    queryKey: [service, instanceId, 'tags'],
+    queryFn: async () => (await api.get(`${arrBase(service, instanceId)}/tag`)).data,
     staleTime: 60_000,
   })
 
   const { data: schemas } = useQuery<ArrIndexer[]>({
-    queryKey: [service, 'indexer-schema'],
+    queryKey: [service, instanceId, 'indexer-schema'],
     queryFn: async () => (await api.get(`${base}/schema`)).data,
     staleTime: 300_000,
     enabled: pickingSchema,
@@ -495,13 +506,13 @@ function ArrIndexerSection({ service }: { service: ArrService }) {
 
   const toggleFlag = useMutation({
     mutationFn: (indexer: ArrIndexer) => api.put(`${base}/${indexer.id}`, indexer),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [service, 'indexers'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [service, instanceId, 'indexers'] }),
   })
 
   const deleteIndexer = useMutation({
     mutationFn: (id: number) => api.delete(`${base}/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [service, 'indexers'] })
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, 'indexers'] })
       setDeleteTarget(null)
     },
   })
@@ -529,7 +540,7 @@ function ArrIndexerSection({ service }: { service: ArrService }) {
 
   const closeAndRefresh = () => {
     setEditing(null)
-    queryClient.invalidateQueries({ queryKey: [service, 'indexers'] })
+    queryClient.invalidateQueries({ queryKey: [service, instanceId, 'indexers'] })
   }
 
   return (
@@ -666,6 +677,7 @@ function ArrIndexerSection({ service }: { service: ArrService }) {
       {editing && (
         <IndexerModal
           service={service}
+          instanceId={instanceId}
           tags={tags ?? []}
           initial={editing}
           onClose={() => setEditing(null)}
@@ -678,9 +690,9 @@ function ArrIndexerSection({ service }: { service: ArrService }) {
 
 // ── Download client section ─────────────────────────────────────────────────
 
-function ArrDownloadClientSection({ service }: { service: ArrService }) {
+function ArrDownloadClientSection({ service, instanceId }: { service: ArrService; instanceId?: string }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/${apiV(service)}/downloadclient`
+  const base = `${arrBase(service, instanceId)}/downloadclient`
   const [editing, setEditing] = useState<ArrDownloadClient | null>(null)
   const [pickingSchema, setPickingSchema] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
@@ -688,19 +700,19 @@ function ArrDownloadClientSection({ service }: { service: ArrService }) {
   const [testAllState, setTestAllState] = useState<'idle' | 'testing' | 'done'>('idle')
 
   const { data: clients, isLoading } = useQuery<ArrDownloadClient[]>({
-    queryKey: [service, 'downloadclients'],
+    queryKey: [service, instanceId, 'downloadclients'],
     queryFn: async () => (await api.get(base)).data,
     staleTime: 30_000,
   })
 
   const { data: tags } = useQuery<ArrTag[]>({
-    queryKey: [service, 'tags'],
-    queryFn: async () => (await api.get(`/proxy/${service}/api/${apiV(service)}/tag`)).data,
+    queryKey: [service, instanceId, 'tags'],
+    queryFn: async () => (await api.get(`${arrBase(service, instanceId)}/tag`)).data,
     staleTime: 60_000,
   })
 
   const { data: schemas } = useQuery<ArrDownloadClient[]>({
-    queryKey: [service, 'downloadclient-schema'],
+    queryKey: [service, instanceId, 'downloadclient-schema'],
     queryFn: async () => (await api.get(`${base}/schema`)).data,
     staleTime: 300_000,
     enabled: pickingSchema,
@@ -708,13 +720,13 @@ function ArrDownloadClientSection({ service }: { service: ArrService }) {
 
   const toggleEnable = useMutation({
     mutationFn: (client: ArrDownloadClient) => api.put(`${base}/${client.id}`, { ...client, enable: !client.enable }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [service, 'downloadclients'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [service, instanceId, 'downloadclients'] }),
   })
 
   const deleteClient = useMutation({
     mutationFn: (id: number) => api.delete(`${base}/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [service, 'downloadclients'] })
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, 'downloadclients'] })
       setDeleteTarget(null)
     },
   })
@@ -742,7 +754,7 @@ function ArrDownloadClientSection({ service }: { service: ArrService }) {
 
   const closeAndRefresh = () => {
     setEditing(null)
-    queryClient.invalidateQueries({ queryKey: [service, 'downloadclients'] })
+    queryClient.invalidateQueries({ queryKey: [service, instanceId, 'downloadclients'] })
   }
 
   return (
@@ -871,6 +883,7 @@ function ArrDownloadClientSection({ service }: { service: ArrService }) {
       {editing && (
         <DownloadClientModal
           service={service}
+          instanceId={instanceId}
           tags={tags ?? []}
           initial={editing}
           onClose={() => setEditing(null)}
@@ -883,14 +896,14 @@ function ArrDownloadClientSection({ service }: { service: ArrService }) {
 
 // ── Root folders section ─────────────────────────────────────────────────
 
-function ArrRootFoldersSection({ service }: { service: ArrService }) {
+function ArrRootFoldersSection({ service, instanceId }: { service: ArrService; instanceId?: string }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/${apiV(service)}/rootfolder`
+  const base = `${arrBase(service, instanceId)}/rootfolder`
   const [newPath, setNewPath] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
 
   const { data: folders, isLoading } = useQuery<ArrRootFolder[]>({
-    queryKey: [service, 'rootfolder'],
+    queryKey: [service, instanceId, 'rootfolder'],
     queryFn: async () => (await api.get(base)).data,
     staleTime: 30_000,
   })
@@ -898,7 +911,7 @@ function ArrRootFoldersSection({ service }: { service: ArrService }) {
   const add = useMutation({
     mutationFn: (path: string) => api.post(base, { path }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [service, 'rootfolder'] })
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, 'rootfolder'] })
       setNewPath('')
     },
   })
@@ -906,7 +919,7 @@ function ArrRootFoldersSection({ service }: { service: ArrService }) {
   const remove = useMutation({
     mutationFn: (id: number) => api.delete(`${base}/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [service, 'rootfolder'] })
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, 'rootfolder'] })
       setDeleteTarget(null)
     },
   })
@@ -978,15 +991,16 @@ function qualityCutoffOptions(items: ArrQualityItem[]) {
 }
 
 function QualityProfileModal({
-  service, profile, onClose, onSaved,
+  service, instanceId, profile, onClose, onSaved,
 }: {
   service: ArrService
+  instanceId?: string
   profile: ArrQualityProfile
   onClose: () => void
   onSaved: () => void
 }) {
   const [draft, setDraft] = useState<ArrQualityProfile>(profile)
-  const base = `/proxy/${service}/api/${apiV(service)}/qualityprofile`
+  const base = `${arrBase(service, instanceId)}/qualityprofile`
 
   const save = useMutation({
     mutationFn: (p: ArrQualityProfile) => (p.id ? api.put(`${base}/${p.id}`, p) : api.post(base, p)),
@@ -1066,14 +1080,14 @@ function QualityProfileModal({
   )
 }
 
-function ArrQualityProfilesSection({ service }: { service: ArrService }) {
+function ArrQualityProfilesSection({ service, instanceId }: { service: ArrService; instanceId?: string }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/${apiV(service)}/qualityprofile`
+  const base = `${arrBase(service, instanceId)}/qualityprofile`
   const [editing, setEditing] = useState<ArrQualityProfile | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
 
   const { data: profiles, isLoading } = useQuery<ArrQualityProfile[]>({
-    queryKey: [service, 'qualityprofile'],
+    queryKey: [service, instanceId, 'qualityprofile'],
     queryFn: async () => (await api.get(base)).data,
     staleTime: 30_000,
   })
@@ -1081,14 +1095,14 @@ function ArrQualityProfilesSection({ service }: { service: ArrService }) {
   const remove = useMutation({
     mutationFn: (id: number) => api.delete(`${base}/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [service, 'qualityprofile'] })
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, 'qualityprofile'] })
       setDeleteTarget(null)
     },
   })
 
   const closeAndRefresh = () => {
     setEditing(null)
-    queryClient.invalidateQueries({ queryKey: [service, 'qualityprofile'] })
+    queryClient.invalidateQueries({ queryKey: [service, instanceId, 'qualityprofile'] })
   }
 
   return (
@@ -1151,7 +1165,7 @@ function ArrQualityProfilesSection({ service }: { service: ArrService }) {
       )}
 
       {editing && (
-        <QualityProfileModal service={service} profile={editing} onClose={() => setEditing(null)} onSaved={closeAndRefresh} />
+        <QualityProfileModal service={service} instanceId={instanceId} profile={editing} onClose={() => setEditing(null)} onSaved={closeAndRefresh} />
       )}
     </div>
   )
@@ -1162,15 +1176,15 @@ function ArrQualityProfilesSection({ service }: { service: ArrService }) {
 // component (parameterized by endpoint) covers all of them via typeof-based
 // field rendering — no need to hardcode each endpoint's field list.
 
-function ArrFlatConfigSection({ service, endpoint }: { service: ArrService; endpoint: string }) {
+function ArrFlatConfigSection({ service, instanceId, endpoint }: { service: ArrService; instanceId?: string; endpoint: string }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/${apiV(service)}/${endpoint}`
+  const base = `${arrBase(service, instanceId)}/${endpoint}`
   const [draft, setDraft] = useState<Record<string, unknown> | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery<Record<string, unknown>>({
-    queryKey: [service, endpoint],
+    queryKey: [service, instanceId, endpoint],
     queryFn: async () => (await api.get(base)).data,
     staleTime: 30_000,
   })
@@ -1196,7 +1210,7 @@ function ArrFlatConfigSection({ service, endpoint }: { service: ArrService; endp
     try {
       await api.put(`${base}/${draft.id}`, draft)
       setSaveState('saved')
-      queryClient.invalidateQueries({ queryKey: [service, endpoint] })
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, endpoint] })
       setTimeout(() => setSaveState('idle'), 2500)
     } catch (err) {
       setSaveState('error')
@@ -1275,22 +1289,35 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: 'host', label: 'Host / General' },
 ]
 
+interface InstanceOption {
+  service: ArrService
+  instanceId?: string
+  label: string
+}
+
 export default function ArrManage() {
-  const { enabledServices } = useConfig()
+  const { enabledServices, config } = useConfig()
   const hasSonarr = enabledServices.includes('sonarr')
   const hasRadarr = enabledServices.includes('radarr')
   const hasLidarr = enabledServices.includes('lidarr')
 
-  const services: ArrService[] = [
-    ...(hasSonarr ? (['sonarr'] as const) : []),
-    ...(hasRadarr ? (['radarr'] as const) : []),
-    ...(hasLidarr ? (['lidarr'] as const) : []),
+  // Flattens the primary instance (from Settings → Services) and any secondary
+  // named instances (from Settings → Additional Instances) into one list, so
+  // e.g. a second "Sonarr 4K" instance shows up as just another tab alongside
+  // the primary Sonarr.
+  const options: InstanceOption[] = [
+    ...(hasSonarr ? [{ service: 'sonarr' as const, label: 'Sonarr' }] : []),
+    ...(config?.additionalInstances?.sonarr ?? []).map((i) => ({ service: 'sonarr' as const, instanceId: i.id, label: i.name })),
+    ...(hasRadarr ? [{ service: 'radarr' as const, label: 'Radarr' }] : []),
+    ...(config?.additionalInstances?.radarr ?? []).map((i) => ({ service: 'radarr' as const, instanceId: i.id, label: i.name })),
+    ...(hasLidarr ? [{ service: 'lidarr' as const, label: 'Lidarr' }] : []),
+    ...(config?.additionalInstances?.lidarr ?? []).map((i) => ({ service: 'lidarr' as const, instanceId: i.id, label: i.name })),
   ]
 
-  const [activeService, setActiveService] = useState<ArrService | null>(services[0] ?? null)
+  const [activeIndex, setActiveIndex] = useState(0)
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('indexers')
 
-  if (services.length === 0) {
+  if (options.length === 0) {
     return (
       <div className="p-6">
         <h1 className="text-2xl font-bold text-white mb-4">Sonarr / Radarr / Lidarr</h1>
@@ -1299,23 +1326,23 @@ export default function ArrManage() {
     )
   }
 
-  const service = activeService ?? services[0]
+  const active = options[Math.min(activeIndex, options.length - 1)]
 
   return (
     <div className="p-6 max-w-6xl">
       <h1 className="text-2xl font-bold text-white mb-5">Sonarr / Radarr / Lidarr</h1>
 
-      {services.length > 1 && (
-        <div className="flex items-center gap-1 mb-4">
-          {services.map((s) => (
+      {options.length > 1 && (
+        <div className="flex items-center gap-1 mb-4 flex-wrap">
+          {options.map((o, i) => (
             <button
-              key={s}
-              onClick={() => setActiveService(s)}
-              className={`text-sm px-3 py-1.5 rounded-lg font-medium capitalize transition-colors ${
-                service === s ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
+              key={`${o.service}-${o.instanceId ?? 'primary'}`}
+              onClick={() => setActiveIndex(i)}
+              className={`text-sm px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                active === o ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
               }`}
             >
-              {s}
+              {o.label}
             </button>
           ))}
         </div>
@@ -1335,14 +1362,14 @@ export default function ArrManage() {
         ))}
       </div>
 
-      {/* key={service} forces a clean remount when switching Sonarr/Radarr so section state doesn't leak across */}
-      {activeSubTab === 'indexers' && <ArrIndexerSection key={`${service}-indexers`} service={service} />}
-      {activeSubTab === 'downloadclients' && <ArrDownloadClientSection key={`${service}-dlc`} service={service} />}
-      {activeSubTab === 'rootfolders' && <ArrRootFoldersSection key={`${service}-rootfolders`} service={service} />}
-      {activeSubTab === 'qualityprofiles' && <ArrQualityProfilesSection key={`${service}-qualityprofiles`} service={service} />}
-      {activeSubTab === 'naming' && <ArrFlatConfigSection key={`${service}-naming`} service={service} endpoint="config/naming" />}
-      {activeSubTab === 'mediamanagement' && <ArrFlatConfigSection key={`${service}-mediamanagement`} service={service} endpoint="config/mediamanagement" />}
-      {activeSubTab === 'host' && <ArrFlatConfigSection key={`${service}-host`} service={service} endpoint="config/host" />}
+      {/* key forces a clean remount when switching instances so section state doesn't leak across */}
+      {activeSubTab === 'indexers' && <ArrIndexerSection key={`${active.service}-${active.instanceId}-indexers`} service={active.service} instanceId={active.instanceId} />}
+      {activeSubTab === 'downloadclients' && <ArrDownloadClientSection key={`${active.service}-${active.instanceId}-dlc`} service={active.service} instanceId={active.instanceId} />}
+      {activeSubTab === 'rootfolders' && <ArrRootFoldersSection key={`${active.service}-${active.instanceId}-rootfolders`} service={active.service} instanceId={active.instanceId} />}
+      {activeSubTab === 'qualityprofiles' && <ArrQualityProfilesSection key={`${active.service}-${active.instanceId}-qualityprofiles`} service={active.service} instanceId={active.instanceId} />}
+      {activeSubTab === 'naming' && <ArrFlatConfigSection key={`${active.service}-${active.instanceId}-naming`} service={active.service} instanceId={active.instanceId} endpoint="config/naming" />}
+      {activeSubTab === 'mediamanagement' && <ArrFlatConfigSection key={`${active.service}-${active.instanceId}-mediamanagement`} service={active.service} instanceId={active.instanceId} endpoint="config/mediamanagement" />}
+      {activeSubTab === 'host' && <ArrFlatConfigSection key={`${active.service}-${active.instanceId}-host`} service={active.service} instanceId={active.instanceId} endpoint="config/host" />}
     </div>
   )
 }
