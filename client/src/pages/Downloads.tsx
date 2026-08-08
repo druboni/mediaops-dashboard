@@ -118,7 +118,7 @@ function ClientBadge({ client }: { client: 'qbittorrent' | 'nzbget' }) {
 // Key = `${service}-${id}`, value = Date.now() when first seen as 'importing'.
 function useImportingTimestamps(importing: ImportingItem[] | undefined) {
   const startTimes = useRef<Map<string, number>>(new Map())
-  const [tick, setTick] = useState(0)
+  const [, setTick] = useState(0)
 
   useEffect(() => {
     if (!importing) return

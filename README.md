@@ -253,7 +253,7 @@ services:
       - NODE_TLS_REJECT_UNAUTHORIZED=0
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/ping"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -106,7 +106,7 @@ function sortLabel(sort: string) {
 
 // ── Show detail: seasons + episodes ─────────────────────────────────────────
 
-function SeasonPanel({ season, showRatingKey }: { season: Season; showRatingKey: string }) {
+function SeasonPanel({ season }: { season: Season }) {
   const [open, setOpen] = useState(true)
 
   const { data, isLoading } = useQuery<ChildrenData>({
@@ -230,6 +230,13 @@ function ShowDetail({
 
   return (
     <div>
+      <button
+        onClick={onBack}
+        className="text-xs text-gray-500 hover:text-white transition-colors mb-4 flex items-center gap-1"
+      >
+        ‹ Back to library
+      </button>
+
       {/* Show header */}
       <div className="flex gap-4 mb-6">
         {show.thumb && (
@@ -280,7 +287,7 @@ function ShowDetail({
       ) : (
         <div>
           {seasons.map((season) => (
-            <SeasonPanel key={season.ratingKey} season={season} showRatingKey={show.ratingKey} />
+            <SeasonPanel key={season.ratingKey} season={season} />
           ))}
         </div>
       )}

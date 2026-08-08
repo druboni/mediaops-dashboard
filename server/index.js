@@ -31,6 +31,10 @@ const fastify = Fastify({ logger: { level: 'info' } })
 
 await fastify.register(cors, { origin: true })
 
+// Cheap, unauthenticated liveness probe for Docker HEALTHCHECK / orchestrators.
+// (Distinct from /api/health, which is an authenticated feed of arr/storage alerts.)
+fastify.get('/api/ping', async () => ({ ok: true }))
+
 await fastify.register(jwt, {
   secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
 })

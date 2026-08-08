@@ -1,4 +1,5 @@
 node_modules/
 dist/
 config/config.json
+config/app.log*
 .env

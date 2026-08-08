@@ -47,12 +47,6 @@ const TYPE_BADGE: Record<string, string> = {
   music:   'bg-purple-900/60 text-purple-300',
 }
 
-const SERVICE_BADGE: Record<string, string> = {
-  radarr: 'bg-yellow-900/40 text-yellow-400',
-  sonarr: 'bg-blue-900/40 text-blue-400',
-  lidarr: 'bg-green-900/40 text-green-400',
-}
-
 export default function History() {
   const { enabledServices } = useConfig()
   const [eventFilter, setEventFilter] = useState<string>('all')
