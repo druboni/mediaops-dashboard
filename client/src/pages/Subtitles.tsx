@@ -33,6 +33,13 @@ interface SubtitleHistoryItem {
   language?: { code2: string; name: string }
 }
 
+interface Language {
+  code2: string
+  code3: string
+  name: string
+  enabled: boolean
+}
+
 interface Provider {
   name: string
   status: boolean
@@ -444,9 +451,69 @@ function Providers() {
   )
 }
 
+// ── Languages ──────────────────────────────────────────────────────────────
+// View-only: Bazarr keeps language/provider config in one settings blob with
+// no per-item write endpoints, so this mirrors the read-only Providers tab
+// rather than attempting edits against an unverified schema.
+
+function Languages() {
+  const { data, isLoading } = useQuery<Language[]>({
+    queryKey: ['bazarr-languages'],
+    queryFn: async () => (await api.get('/proxy/bazarr/api/system/languages')).data,
+    staleTime: 60_000,
+  })
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {[...Array(8)].map((_, i) => <div key={i} className="h-11 bg-gray-900 rounded-lg animate-pulse" />)}
+      </div>
+    )
+  }
+
+  if (!data?.length) {
+    return <div className="text-center py-20 text-gray-600 text-sm">No languages found</div>
+  }
+
+  const enabled = data.filter((l) => l.enabled)
+  const disabled = data.filter((l) => !l.enabled)
+
+  return (
+    <div>
+      <p className="text-xs text-gray-600 mb-4">
+        View-only — enable or configure languages in Bazarr's own Settings → Languages.
+      </p>
+      <p className="text-xs text-gray-500 mb-2">{enabled.length} enabled</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-6">
+        {enabled.map((l) => (
+          <div key={l.code2} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+            <span className="text-sm text-white truncate">{l.name}</span>
+            <span className="text-xs text-gray-600 ml-auto shrink-0">{l.code2}</span>
+          </div>
+        ))}
+      </div>
+      {disabled.length > 0 && (
+        <>
+          <p className="text-xs text-gray-600 mb-2">{disabled.length} available, not enabled</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {disabled.map((l) => (
+              <div key={l.code2} className="bg-gray-900/50 border border-gray-800/50 rounded-lg px-3 py-2 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-700 shrink-0" />
+                <span className="text-sm text-gray-500 truncate">{l.name}</span>
+                <span className="text-xs text-gray-700 ml-auto shrink-0">{l.code2}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 
-type Tab = 'wanted-movies' | 'wanted-episodes' | 'history' | 'providers'
+type Tab = 'wanted-movies' | 'wanted-episodes' | 'history' | 'providers' | 'languages'
 
 export default function Subtitles() {
   const { enabledServices } = useConfig()
@@ -468,6 +535,7 @@ export default function Subtitles() {
     { id: 'wanted-episodes', label: 'Wanted Episodes' },
     { id: 'history', label: 'History' },
     { id: 'providers', label: 'Providers' },
+    { id: 'languages', label: 'Languages' },
   ]
 
   return (
@@ -495,6 +563,7 @@ export default function Subtitles() {
       {tab === 'wanted-episodes' && <WantedEpisodes />}
       {tab === 'history' && <History />}
       {tab === 'providers' && <Providers />}
+      {tab === 'languages' && <Languages />}
     </div>
   )
 }
