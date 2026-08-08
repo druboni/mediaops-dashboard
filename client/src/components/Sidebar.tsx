@@ -50,7 +50,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Utilities',
     items: [
-      { label: 'Sonarr / Radarr', path: '/arr-manage', anyOf: ['sonarr', 'radarr'] },
+      { label: 'Sonarr / Radarr / Lidarr', path: '/arr-manage', anyOf: ['sonarr', 'radarr', 'lidarr'] },
       { label: 'Wanted',    path: '/wanted',   anyOf: ['radarr', 'sonarr'] },
       { label: 'History',   path: '/history',  anyOf: ['radarr', 'sonarr', 'lidarr'] },
       { label: 'Stats',     path: '/stats',    service: 'tautulli' },

@@ -3,7 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
 
-type ArrService = 'sonarr' | 'radarr'
+type ArrService = 'sonarr' | 'radarr' | 'lidarr'
+
+// Sonarr/Radarr are on the v3 REST API; Lidarr is still on v1.
+function apiV(service: ArrService) {
+  return service === 'lidarr' ? 'v1' : 'v3'
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +60,33 @@ interface ArrDownloadClient {
   [key: string]: unknown
 }
 
+interface ArrRootFolder {
+  id?: number
+  path: string
+  accessible?: boolean
+  freeSpace?: number
+  unmappedFolders?: { name: string; path: string }[]
+  [key: string]: unknown
+}
+
+interface ArrQualityItem {
+  id?: number
+  name?: string
+  quality?: { id: number; name: string }
+  items?: ArrQualityItem[]
+  allowed: boolean
+  [key: string]: unknown
+}
+
+interface ArrQualityProfile {
+  id?: number
+  name: string
+  upgradeAllowed: boolean
+  cutoff: number
+  items: ArrQualityItem[]
+  [key: string]: unknown
+}
+
 type TestState = 'idle' | 'testing' | 'ok' | 'fail'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -73,6 +105,13 @@ function extractError(err: unknown): string {
     }
   }
   return err instanceof Error ? err.message : 'Request failed'
+}
+
+function formatBytes(b: number) {
+  if (b >= 1_099_511_627_776) return `${(b / 1_099_511_627_776).toFixed(1)} TB`
+  if (b >= 1_073_741_824) return `${(b / 1_073_741_824).toFixed(1)} GB`
+  if (b >= 1_048_576) return `${(b / 1_048_576).toFixed(0)} MB`
+  return `${b} B`
 }
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
@@ -270,7 +309,7 @@ function IndexerModal({
   onSaved: () => void
 }) {
   const [draft, setDraft] = useState<ArrIndexer>(initial)
-  const base = `/proxy/${service}/api/v3/indexer`
+  const base = `/proxy/${service}/api/${apiV(service)}/indexer`
 
   const save = useMutation({
     mutationFn: (item: ArrIndexer) => (item.id ? api.put(`${base}/${item.id}`, item) : api.post(base, item)),
@@ -357,7 +396,7 @@ function DownloadClientModal({
   onSaved: () => void
 }) {
   const [draft, setDraft] = useState<ArrDownloadClient>(initial)
-  const base = `/proxy/${service}/api/v3/downloadclient`
+  const base = `/proxy/${service}/api/${apiV(service)}/downloadclient`
 
   const save = useMutation({
     mutationFn: (item: ArrDownloadClient) => (item.id ? api.put(`${base}/${item.id}`, item) : api.post(base, item)),
@@ -428,7 +467,7 @@ function DownloadClientModal({
 
 function ArrIndexerSection({ service }: { service: ArrService }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/v3/indexer`
+  const base = `/proxy/${service}/api/${apiV(service)}/indexer`
   const [editing, setEditing] = useState<ArrIndexer | null>(null)
   const [pickingSchema, setPickingSchema] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
@@ -443,7 +482,7 @@ function ArrIndexerSection({ service }: { service: ArrService }) {
 
   const { data: tags } = useQuery<ArrTag[]>({
     queryKey: [service, 'tags'],
-    queryFn: async () => (await api.get(`/proxy/${service}/api/v3/tag`)).data,
+    queryFn: async () => (await api.get(`/proxy/${service}/api/${apiV(service)}/tag`)).data,
     staleTime: 60_000,
   })
 
@@ -641,7 +680,7 @@ function ArrIndexerSection({ service }: { service: ArrService }) {
 
 function ArrDownloadClientSection({ service }: { service: ArrService }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/v3/downloadclient`
+  const base = `/proxy/${service}/api/${apiV(service)}/downloadclient`
   const [editing, setEditing] = useState<ArrDownloadClient | null>(null)
   const [pickingSchema, setPickingSchema] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
@@ -656,7 +695,7 @@ function ArrDownloadClientSection({ service }: { service: ArrService }) {
 
   const { data: tags } = useQuery<ArrTag[]>({
     queryKey: [service, 'tags'],
-    queryFn: async () => (await api.get(`/proxy/${service}/api/v3/tag`)).data,
+    queryFn: async () => (await api.get(`/proxy/${service}/api/${apiV(service)}/tag`)).data,
     staleTime: 60_000,
   })
 
@@ -842,17 +881,296 @@ function ArrDownloadClientSection({ service }: { service: ArrService }) {
   )
 }
 
-// ── Host / general config section ───────────────────────────────────────────
+// ── Root folders section ─────────────────────────────────────────────────
 
-function ArrHostConfigSection({ service }: { service: ArrService }) {
+function ArrRootFoldersSection({ service }: { service: ArrService }) {
   const queryClient = useQueryClient()
-  const base = `/proxy/${service}/api/v3/config/host`
+  const base = `/proxy/${service}/api/${apiV(service)}/rootfolder`
+  const [newPath, setNewPath] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
+
+  const { data: folders, isLoading } = useQuery<ArrRootFolder[]>({
+    queryKey: [service, 'rootfolder'],
+    queryFn: async () => (await api.get(base)).data,
+    staleTime: 30_000,
+  })
+
+  const add = useMutation({
+    mutationFn: (path: string) => api.post(base, { path }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [service, 'rootfolder'] })
+      setNewPath('')
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: number) => api.delete(`${base}/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [service, 'rootfolder'] })
+      setDeleteTarget(null)
+    },
+  })
+
+  return (
+    <div className="max-w-2xl">
+      <form
+        onSubmit={(e) => { e.preventDefault(); if (newPath.trim()) add.mutate(newPath.trim()) }}
+        className="flex items-center gap-2 mb-4"
+      >
+        <input
+          value={newPath}
+          onChange={(e) => setNewPath(e.target.value)}
+          placeholder="/path/inside/the/arr/container"
+          className="input flex-1"
+        />
+        <button
+          type="submit"
+          disabled={!newPath.trim() || add.isPending}
+          className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-50 shrink-0"
+        >
+          {add.isPending ? 'Adding…' : '+ Add'}
+        </button>
+      </form>
+      {add.isError && <p className="text-red-400 text-xs mb-3">{extractError(add.error)}</p>}
+
+      {isLoading ? (
+        <div className="space-y-1.5">
+          {[...Array(2)].map((_, i) => <div key={i} className="h-11 bg-gray-900 rounded-lg animate-pulse" />)}
+        </div>
+      ) : !folders?.length ? (
+        <p className="text-gray-600 text-sm py-8 text-center">No root folders configured</p>
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800/50">
+          {folders.map((f) => (
+            <div key={f.id} className="px-4 py-2.5 flex items-center gap-3 group">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${f.accessible ? 'bg-green-400' : 'bg-red-500'}`} />
+              <span className="flex-1 min-w-0 text-sm text-white truncate font-mono">{f.path}</span>
+              {f.freeSpace !== undefined && (
+                <span className="text-xs text-gray-500 shrink-0 tabular-nums">{formatBytes(f.freeSpace)} free</span>
+              )}
+              {deleteTarget === f.id ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => remove.mutate(f.id!)} className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white transition-colors">Confirm</button>
+                  <button onClick={() => setDeleteTarget(null)} className="text-xs px-1.5 py-1 rounded bg-gray-700 text-gray-400 hover:text-white transition-colors">✕</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setDeleteTarget(f.id!)}
+                  className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-red-800 text-gray-500 hover:text-red-300 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Quality profiles section ────────────────────────────────────────────────
+
+function qualityCutoffOptions(items: ArrQualityItem[]) {
+  return items
+    .filter((it) => it.allowed)
+    .map((it) => ({ value: it.quality ? it.quality.id : it.id!, label: it.quality?.name ?? it.name ?? 'Unknown' }))
+}
+
+function QualityProfileModal({
+  service, profile, onClose, onSaved,
+}: {
+  service: ArrService
+  profile: ArrQualityProfile
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [draft, setDraft] = useState<ArrQualityProfile>(profile)
+  const base = `/proxy/${service}/api/${apiV(service)}/qualityprofile`
+
+  const save = useMutation({
+    mutationFn: (p: ArrQualityProfile) => (p.id ? api.put(`${base}/${p.id}`, p) : api.post(base, p)),
+    onSuccess: onSaved,
+  })
+
+  const toggleItem = (idx: number) => {
+    setDraft((d) => ({
+      ...d,
+      items: d.items.map((it, i) => (i === idx ? { ...it, allowed: !it.allowed } : it)),
+    }))
+  }
+
+  const cutoffOptions = qualityCutoffOptions(draft.items)
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 shrink-0">
+          <h3 className="text-white font-semibold">{draft.id ? 'Edit Quality Profile' : 'New Quality Profile'}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">✕</button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto space-y-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Name</label>
+            <input
+              className="input w-full"
+              value={draft.name}
+              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+            />
+          </div>
+          <label className="flex items-center justify-between py-1">
+            <span className="text-xs text-gray-400">Upgrade until cutoff</span>
+            <Toggle enabled={draft.upgradeAllowed} onChange={(v) => setDraft((d) => ({ ...d, upgradeAllowed: v }))} />
+          </label>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Cutoff quality</label>
+            <select
+              className="input w-full"
+              value={draft.cutoff}
+              onChange={(e) => setDraft((d) => ({ ...d, cutoff: Number(e.target.value) }))}
+            >
+              {cutoffOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div className="border-t border-gray-800 pt-3">
+            <p className="text-xs text-gray-400 mb-2">Allowed qualities (top = highest priority)</p>
+            <div className="space-y-1">
+              {draft.items.map((it, i) => (
+                <label key={it.quality?.id ?? it.id ?? i} className="flex items-center justify-between py-1">
+                  <span className={`text-sm ${it.allowed ? 'text-white' : 'text-gray-600'}`}>
+                    {it.quality?.name ?? it.name}
+                    {it.items?.length ? <span className="text-[10px] text-gray-600 ml-1.5">(group)</span> : null}
+                  </span>
+                  <Toggle enabled={it.allowed} onChange={() => toggleItem(i)} />
+                </label>
+              ))}
+            </div>
+          </div>
+          {save.isError && <p className="text-red-400 text-xs">{extractError(save.error)}</p>}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-800 shrink-0">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded bg-gray-800 text-gray-400 hover:text-white transition-colors">Cancel</button>
+          <button
+            onClick={() => save.mutate(draft)}
+            disabled={save.isPending}
+            className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-50"
+          >
+            {save.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ArrQualityProfilesSection({ service }: { service: ArrService }) {
+  const queryClient = useQueryClient()
+  const base = `/proxy/${service}/api/${apiV(service)}/qualityprofile`
+  const [editing, setEditing] = useState<ArrQualityProfile | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
+
+  const { data: profiles, isLoading } = useQuery<ArrQualityProfile[]>({
+    queryKey: [service, 'qualityprofile'],
+    queryFn: async () => (await api.get(base)).data,
+    staleTime: 30_000,
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: number) => api.delete(`${base}/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [service, 'qualityprofile'] })
+      setDeleteTarget(null)
+    },
+  })
+
+  const closeAndRefresh = () => {
+    setEditing(null)
+    queryClient.invalidateQueries({ queryKey: [service, 'qualityprofile'] })
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-4">
+        {profiles && profiles.length > 0 && (
+          <button
+            onClick={() => setEditing({ ...structuredClone(profiles[0]), id: undefined, name: `${profiles[0].name} copy` })}
+            className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+          >
+            + Duplicate "{profiles[0].name}"
+          </button>
+        )}
+        {profiles && <span className="text-xs text-gray-600 ml-1">{profiles.length} profiles</span>}
+      </div>
+      <p className="text-xs text-gray-600 mb-4">
+        New profiles are created by duplicating an existing one — pick the result to edit its name and qualities.
+      </p>
+
+      {isLoading ? (
+        <div className="space-y-1.5">
+          {[...Array(3)].map((_, i) => <div key={i} className="h-11 bg-gray-900 rounded-lg animate-pulse" />)}
+        </div>
+      ) : !profiles?.length ? (
+        <p className="text-gray-600 text-sm py-8 text-center">No quality profiles found</p>
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800/50">
+          {profiles.map((p) => {
+            const cutoffLabel = qualityCutoffOptions(p.items).find((o) => o.value === p.cutoff)?.label ?? '—'
+            return (
+              <div key={p.id} className="px-4 py-2.5 flex items-center gap-3 group">
+                <span className="flex-1 min-w-0 text-sm text-white truncate">{p.name}</span>
+                <span className="text-xs text-gray-500 shrink-0">Cutoff: {cutoffLabel}</span>
+                {p.upgradeAllowed && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-300 font-medium shrink-0">Upgrades</span>
+                )}
+                <button
+                  onClick={() => setEditing(p)}
+                  className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors shrink-0"
+                >
+                  Edit
+                </button>
+                {deleteTarget === p.id ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => remove.mutate(p.id!)} className="text-xs px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-white transition-colors">Confirm</button>
+                    <button onClick={() => setDeleteTarget(null)} className="text-xs px-1.5 py-1 rounded bg-gray-700 text-gray-400 hover:text-white transition-colors">✕</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteTarget(p.id!)}
+                    className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-red-800 text-gray-500 hover:text-red-300 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {editing && (
+        <QualityProfileModal service={service} profile={editing} onClose={() => setEditing(null)} onSaved={closeAndRefresh} />
+      )}
+    </div>
+  )
+}
+
+// ── Generic flat config section (host / naming / media management) ─────────
+// These three arr endpoints are all a single flat resource with an id, so one
+// component (parameterized by endpoint) covers all of them via typeof-based
+// field rendering — no need to hardcode each endpoint's field list.
+
+function ArrFlatConfigSection({ service, endpoint }: { service: ArrService; endpoint: string }) {
+  const queryClient = useQueryClient()
+  const base = `/proxy/${service}/api/${apiV(service)}/${endpoint}`
   const [draft, setDraft] = useState<Record<string, unknown> | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery<Record<string, unknown>>({
-    queryKey: [service, 'config-host'],
+    queryKey: [service, endpoint],
     queryFn: async () => (await api.get(base)).data,
     staleTime: 30_000,
   })
@@ -878,7 +1196,7 @@ function ArrHostConfigSection({ service }: { service: ArrService }) {
     try {
       await api.put(`${base}/${draft.id}`, draft)
       setSaveState('saved')
-      queryClient.invalidateQueries({ queryKey: [service, 'config-host'] })
+      queryClient.invalidateQueries({ queryKey: [service, endpoint] })
       setTimeout(() => setSaveState('idle'), 2500)
     } catch (err) {
       setSaveState('error')
@@ -945,11 +1263,15 @@ function ArrHostConfigSection({ service }: { service: ArrService }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────
 
-type SubTab = 'indexers' | 'downloadclients' | 'host'
+type SubTab = 'indexers' | 'downloadclients' | 'rootfolders' | 'qualityprofiles' | 'naming' | 'mediamanagement' | 'host'
 
 const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: 'indexers', label: 'Indexers' },
   { key: 'downloadclients', label: 'Download Clients' },
+  { key: 'rootfolders', label: 'Root Folders' },
+  { key: 'qualityprofiles', label: 'Quality Profiles' },
+  { key: 'naming', label: 'Naming' },
+  { key: 'mediamanagement', label: 'Media Management' },
   { key: 'host', label: 'Host / General' },
 ]
 
@@ -957,20 +1279,22 @@ export default function ArrManage() {
   const { enabledServices } = useConfig()
   const hasSonarr = enabledServices.includes('sonarr')
   const hasRadarr = enabledServices.includes('radarr')
+  const hasLidarr = enabledServices.includes('lidarr')
 
   const services: ArrService[] = [
     ...(hasSonarr ? (['sonarr'] as const) : []),
     ...(hasRadarr ? (['radarr'] as const) : []),
+    ...(hasLidarr ? (['lidarr'] as const) : []),
   ]
 
   const [activeService, setActiveService] = useState<ArrService | null>(services[0] ?? null)
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('indexers')
 
-  if (!hasSonarr && !hasRadarr) {
+  if (services.length === 0) {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold text-white mb-4">Sonarr / Radarr</h1>
-        <p className="text-gray-500">Enable Sonarr or Radarr in Settings to manage them here.</p>
+        <h1 className="text-2xl font-bold text-white mb-4">Sonarr / Radarr / Lidarr</h1>
+        <p className="text-gray-500">Enable Sonarr, Radarr, or Lidarr in Settings to manage them here.</p>
       </div>
     )
   }
@@ -979,7 +1303,7 @@ export default function ArrManage() {
 
   return (
     <div className="p-6 max-w-6xl">
-      <h1 className="text-2xl font-bold text-white mb-5">Sonarr / Radarr</h1>
+      <h1 className="text-2xl font-bold text-white mb-5">Sonarr / Radarr / Lidarr</h1>
 
       {services.length > 1 && (
         <div className="flex items-center gap-1 mb-4">
@@ -1014,7 +1338,11 @@ export default function ArrManage() {
       {/* key={service} forces a clean remount when switching Sonarr/Radarr so section state doesn't leak across */}
       {activeSubTab === 'indexers' && <ArrIndexerSection key={`${service}-indexers`} service={service} />}
       {activeSubTab === 'downloadclients' && <ArrDownloadClientSection key={`${service}-dlc`} service={service} />}
-      {activeSubTab === 'host' && <ArrHostConfigSection key={`${service}-host`} service={service} />}
+      {activeSubTab === 'rootfolders' && <ArrRootFoldersSection key={`${service}-rootfolders`} service={service} />}
+      {activeSubTab === 'qualityprofiles' && <ArrQualityProfilesSection key={`${service}-qualityprofiles`} service={service} />}
+      {activeSubTab === 'naming' && <ArrFlatConfigSection key={`${service}-naming`} service={service} endpoint="config/naming" />}
+      {activeSubTab === 'mediamanagement' && <ArrFlatConfigSection key={`${service}-mediamanagement`} service={service} endpoint="config/mediamanagement" />}
+      {activeSubTab === 'host' && <ArrFlatConfigSection key={`${service}-host`} service={service} endpoint="config/host" />}
     </div>
   )
 }
