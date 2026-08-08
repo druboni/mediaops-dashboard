@@ -40,6 +40,18 @@ function discordPayloadForSonarrBatch(seriesTitle, episodes) {
   }
 }
 
+// Plain-text equivalent of the Discord embeds above, shared by every other
+// channel (ntfy/Pushover/Telegram don't have Discord's embed format).
+function plainTextForRadarr(body) {
+  const movie = body.movie || {}
+  const upgrade = body.isUpgrade ? ' (upgraded)' : ''
+  return `New addition to the library\n${movie.title || 'Unknown Movie'}${movie.year ? ` (${movie.year})` : ''}${upgrade}`
+}
+
+function plainTextForSonarrBatch(seriesTitle, episodes) {
+  return `New addition to the library\n${seriesTitle}\n${episodes.map(episodeLine).join('\n')}`
+}
+
 async function sendToDiscord(fastify, discordWebhookUrl, payload) {
   try {
     await fetch(discordWebhookUrl, {
@@ -53,7 +65,60 @@ async function sendToDiscord(fastify, discordWebhookUrl, payload) {
   }
 }
 
-function queueSonarrEpisodes(fastify, discordWebhookUrl, series, newEpisodes) {
+async function sendToNtfy(fastify, ntfyUrl, text) {
+  try {
+    await fetch(ntfyUrl, {
+      method: 'POST',
+      headers: { Title: 'New addition to the library' },
+      body: text,
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch (err) {
+    fastify.log.error({ err }, 'Failed to forward media webhook to ntfy')
+  }
+}
+
+async function sendToPushover(fastify, userKey, apiToken, text) {
+  try {
+    await fetch('https://api.pushover.net/1/messages.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token: apiToken, user: userKey, title: 'New addition to the library', message: text }),
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch (err) {
+    fastify.log.error({ err }, 'Failed to forward media webhook to Pushover')
+  }
+}
+
+async function sendToTelegram(fastify, botToken, chatId, text) {
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch (err) {
+    fastify.log.error({ err }, 'Failed to forward media webhook to Telegram')
+  }
+}
+
+// Fans a message out to every enabled channel in parallel — each sender
+// swallows its own errors (logged, not thrown) so one bad channel can't
+// block the others.
+function notifyAll(fastify, notif, discordPayload, text) {
+  if (notif.discordWebhookUrl) sendToDiscord(fastify, notif.discordWebhookUrl, discordPayload)
+  if (notif.ntfyEnabled && notif.ntfyUrl) sendToNtfy(fastify, notif.ntfyUrl, text)
+  if (notif.pushoverEnabled && notif.pushoverUserKey && notif.pushoverApiToken) {
+    sendToPushover(fastify, notif.pushoverUserKey, notif.pushoverApiToken, text)
+  }
+  if (notif.telegramEnabled && notif.telegramBotToken && notif.telegramChatId) {
+    sendToTelegram(fastify, notif.telegramBotToken, notif.telegramChatId, text)
+  }
+}
+
+function queueSonarrEpisodes(fastify, notif, series, newEpisodes) {
   const seriesId = series.id
   let entry = pendingSeries.get(seriesId)
   if (!entry) {
@@ -68,7 +133,11 @@ function queueSonarrEpisodes(fastify, discordWebhookUrl, series, newEpisodes) {
 
   entry.timer = setTimeout(() => {
     pendingSeries.delete(seriesId)
-    sendToDiscord(fastify, discordWebhookUrl, discordPayloadForSonarrBatch(entry.title, entry.episodes))
+    notifyAll(
+      fastify, notif,
+      discordPayloadForSonarrBatch(entry.title, entry.episodes),
+      plainTextForSonarrBatch(entry.title, entry.episodes),
+    )
   }, delay)
 }
 
@@ -81,15 +150,16 @@ export default async function webhookRoutes(fastify) {
     const notif = config.notifications
 
     if (request.params.secret !== notif.webhookSecret) return reply.status(404).send()
-    if (!notif.mediaAddedEnabled || !notif.discordWebhookUrl) return reply.status(200).send()
+    const anyChannelEnabled = notif.discordWebhookUrl || notif.ntfyEnabled || notif.pushoverEnabled || notif.telegramEnabled
+    if (!notif.mediaAddedEnabled || !anyChannelEnabled) return reply.status(200).send()
 
     const body = request.body || {}
     if (body.eventType !== 'Download') return reply.status(200).send()
 
     if (body.movie) {
-      sendToDiscord(fastify, notif.discordWebhookUrl, discordPayloadForRadarr(body))
+      notifyAll(fastify, notif, discordPayloadForRadarr(body), plainTextForRadarr(body))
     } else if (body.series) {
-      queueSonarrEpisodes(fastify, notif.discordWebhookUrl, body.series, body.episodes || [])
+      queueSonarrEpisodes(fastify, notif, body.series, body.episodes || [])
     }
 
     return reply.status(200).send()

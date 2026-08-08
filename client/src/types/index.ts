@@ -28,6 +28,14 @@ export interface NotificationsConfig {
   discordWebhookUrl: string
   mediaAddedEnabled: boolean
   webhookSecret: string
+  ntfyEnabled: boolean
+  ntfyUrl: string
+  pushoverEnabled: boolean
+  pushoverUserKey: string
+  pushoverApiToken: string
+  telegramEnabled: boolean
+  telegramBotToken: string
+  telegramChatId: string
 }
 
 export interface Config {

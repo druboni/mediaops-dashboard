@@ -57,9 +57,17 @@ export default function Settings() {
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [notifications, setNotifications] = useState<NotificationsConfig>({
     discordWebhookUrl: '', mediaAddedEnabled: false, webhookSecret: '',
+    ntfyEnabled: false, ntfyUrl: '',
+    pushoverEnabled: false, pushoverUserKey: '', pushoverApiToken: '',
+    telegramEnabled: false, telegramBotToken: '', telegramChatId: '',
   })
   const [discordTestStatus, setDiscordTestStatus] = useState<TestStatus>('idle')
   const [discordTestError, setDiscordTestError] = useState('')
+  const [channelTest, setChannelTest] = useState<Record<'ntfy' | 'pushover' | 'telegram', { status: TestStatus; error: string }>>({
+    ntfy: { status: 'idle', error: '' },
+    pushover: { status: 'idle', error: '' },
+    telegram: { status: 'idle', error: '' },
+  })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -130,6 +138,20 @@ export default function Settings() {
           ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
           : undefined
       setDiscordTestError(msg || 'Failed to send test notification')
+    }
+  }
+
+  const testChannel = async (channel: 'ntfy' | 'pushover' | 'telegram', payload: Record<string, string>) => {
+    setChannelTest((p) => ({ ...p, [channel]: { status: 'testing', error: '' } }))
+    try {
+      await api.post(`/config/notifications/test-${channel}`, payload)
+      setChannelTest((p) => ({ ...p, [channel]: { status: 'ok', error: '' } }))
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined
+      setChannelTest((p) => ({ ...p, [channel]: { status: 'error', error: msg || 'Failed to send test notification' } }))
     }
   }
 
@@ -290,7 +312,7 @@ export default function Settings() {
       {/* Notifications */}
       <section className="mt-10 pt-8 border-t border-gray-800">
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Notifications</h2>
-        <p className="text-xs text-gray-600 mb-4">Post to a Discord channel whenever Sonarr or Radarr imports new media</p>
+        <p className="text-xs text-gray-600 mb-4">Notify Discord, ntfy, Pushover, and/or Telegram whenever Sonarr or Radarr imports new media</p>
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div>
@@ -342,6 +364,129 @@ export default function Settings() {
             </>
           )}
         </div>
+
+        {notifications.mediaAddedEnabled && (
+        <>
+        {/* ntfy */}
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 mt-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-white font-medium">ntfy</p>
+            <Toggle
+              enabled={notifications.ntfyEnabled}
+              onChange={(v) => setNotifications((p) => ({ ...p, ntfyEnabled: v }))}
+            />
+          </div>
+          {notifications.ntfyEnabled && (
+            <>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  placeholder="https://ntfy.sh/your-topic"
+                  value={notifications.ntfyUrl}
+                  onChange={(e) => setNotifications((p) => ({ ...p, ntfyUrl: e.target.value }))}
+                  className="input flex-1"
+                />
+                <button
+                  onClick={() => testChannel('ntfy', { ntfyUrl: notifications.ntfyUrl })}
+                  disabled={channelTest.ntfy.status === 'testing' || !notifications.ntfyUrl}
+                  className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                >
+                  {channelTest.ntfy.status === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+              </div>
+              {channelTest.ntfy.status === 'ok' && <p className="text-green-400 text-xs">Test notification sent</p>}
+              {channelTest.ntfy.status === 'error' && <p className="text-red-400 text-xs">{channelTest.ntfy.error}</p>}
+            </>
+          )}
+        </div>
+
+        {/* Pushover */}
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 mt-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-white font-medium">Pushover</p>
+            <Toggle
+              enabled={notifications.pushoverEnabled}
+              onChange={(v) => setNotifications((p) => ({ ...p, pushoverEnabled: v }))}
+            />
+          </div>
+          {notifications.pushoverEnabled && (
+            <>
+              <input
+                type="text"
+                placeholder="User key"
+                value={notifications.pushoverUserKey}
+                onChange={(e) => setNotifications((p) => ({ ...p, pushoverUserKey: e.target.value }))}
+                className="input w-full"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Application API token"
+                  value={notifications.pushoverApiToken}
+                  onChange={(e) => setNotifications((p) => ({ ...p, pushoverApiToken: e.target.value }))}
+                  className="input flex-1"
+                />
+                <button
+                  onClick={() => testChannel('pushover', {
+                    pushoverUserKey: notifications.pushoverUserKey,
+                    pushoverApiToken: notifications.pushoverApiToken,
+                  })}
+                  disabled={channelTest.pushover.status === 'testing' || !notifications.pushoverUserKey || !notifications.pushoverApiToken}
+                  className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                >
+                  {channelTest.pushover.status === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+              </div>
+              {channelTest.pushover.status === 'ok' && <p className="text-green-400 text-xs">Test notification sent</p>}
+              {channelTest.pushover.status === 'error' && <p className="text-red-400 text-xs">{channelTest.pushover.error}</p>}
+            </>
+          )}
+        </div>
+
+        {/* Telegram */}
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 mt-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-white font-medium">Telegram</p>
+            <Toggle
+              enabled={notifications.telegramEnabled}
+              onChange={(v) => setNotifications((p) => ({ ...p, telegramEnabled: v }))}
+            />
+          </div>
+          {notifications.telegramEnabled && (
+            <>
+              <input
+                type="text"
+                placeholder="Bot token (from @BotFather)"
+                value={notifications.telegramBotToken}
+                onChange={(e) => setNotifications((p) => ({ ...p, telegramBotToken: e.target.value }))}
+                className="input w-full"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Chat ID"
+                  value={notifications.telegramChatId}
+                  onChange={(e) => setNotifications((p) => ({ ...p, telegramChatId: e.target.value }))}
+                  className="input flex-1"
+                />
+                <button
+                  onClick={() => testChannel('telegram', {
+                    telegramBotToken: notifications.telegramBotToken,
+                    telegramChatId: notifications.telegramChatId,
+                  })}
+                  disabled={channelTest.telegram.status === 'testing' || !notifications.telegramBotToken || !notifications.telegramChatId}
+                  className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                >
+                  {channelTest.telegram.status === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+              </div>
+              {channelTest.telegram.status === 'ok' && <p className="text-green-400 text-xs">Test notification sent</p>}
+              {channelTest.telegram.status === 'error' && <p className="text-red-400 text-xs">{channelTest.telegram.error}</p>}
+            </>
+          )}
+        </div>
+        </>
+        )}
       </section>
 
       {/* Quick Links */}

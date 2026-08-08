@@ -17,6 +17,14 @@ const DEFAULT_CONFIG = {
     discordWebhookUrl: '',
     mediaAddedEnabled: false,
     webhookSecret: '',
+    ntfyEnabled: false,
+    ntfyUrl: '',
+    pushoverEnabled: false,
+    pushoverUserKey: '',
+    pushoverApiToken: '',
+    telegramEnabled: false,
+    telegramBotToken: '',
+    telegramChatId: '',
   },
   services: {
     plex:        { enabled: false, url: '', apiKey: '' },
@@ -174,6 +182,67 @@ export default async function configRoutes(fastify) {
         signal: AbortSignal.timeout(8000),
       })
       if (!res.ok) return reply.status(502).send({ error: `Discord returned HTTP ${res.status}` })
+      return { ok: true }
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  fastify.post('/notifications/test-ntfy', async (request, reply) => {
+    const { ntfyUrl } = request.body || {}
+    if (!ntfyUrl) return reply.status(400).send({ error: 'Missing ntfy topic URL' })
+    try {
+      const res = await fetch(ntfyUrl, {
+        method: 'POST',
+        headers: { Title: 'MediaOps test notification', Priority: 'default' },
+        body: 'If you can see this, ntfy is wired up correctly.',
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!res.ok) return reply.status(502).send({ error: `ntfy returned HTTP ${res.status}` })
+      return { ok: true }
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  fastify.post('/notifications/test-pushover', async (request, reply) => {
+    const { pushoverUserKey, pushoverApiToken } = request.body || {}
+    if (!pushoverUserKey || !pushoverApiToken) return reply.status(400).send({ error: 'Missing user key or API token' })
+    try {
+      const res = await fetch('https://api.pushover.net/1/messages.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          token: pushoverApiToken,
+          user: pushoverUserKey,
+          title: 'MediaOps test notification',
+          message: 'If you can see this, Pushover is wired up correctly.',
+        }),
+        signal: AbortSignal.timeout(8000),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return reply.status(502).send({ error: data.errors?.[0] || `Pushover returned HTTP ${res.status}` })
+      return { ok: true }
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  fastify.post('/notifications/test-telegram', async (request, reply) => {
+    const { telegramBotToken, telegramChatId } = request.body || {}
+    if (!telegramBotToken || !telegramChatId) return reply.status(400).send({ error: 'Missing bot token or chat ID' })
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: telegramChatId,
+          text: 'MediaOps test notification\n\nIf you can see this, Telegram is wired up correctly.',
+        }),
+        signal: AbortSignal.timeout(8000),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return reply.status(502).send({ error: data.description || `Telegram returned HTTP ${res.status}` })
       return { ok: true }
     } catch (err) {
       return reply.status(502).send({ error: err.message })
