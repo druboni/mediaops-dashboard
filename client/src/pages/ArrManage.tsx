@@ -526,6 +526,11 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
     refetchInterval: 60_000,
   })
   const indexerHealth = (healthData ?? []).filter((h) => h.source.startsWith('Indexer'))
+  // Sonarr/Radarr's health messages name the failing indexer directly (e.g.
+  // "Indexers unavailable due to failures: Generic Torznab (Prowlarr)"), so
+  // this is how a per-row live status badge is derived without a dedicated
+  // per-indexer status endpoint to query.
+  const isFlaggedUnhealthy = (name: string) => indexerHealth.some((h) => h.message.includes(name))
 
   const toggleFlag = useMutation({
     mutationFn: (indexer: ArrIndexer) => api.put(`${base}/${indexer.id}`, indexer),
@@ -563,6 +568,8 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
       setTimeout(() => setTestAllState('idle'), 3000)
     } catch {
       setTestAllState('idle')
+    } finally {
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, 'health'] })
     }
   }
 
@@ -598,14 +605,21 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
           }`}
         >
           <span className={`shrink-0 mt-0.5 ${h.type === 'error' ? 'text-red-400' : 'text-orange-400'}`}>⚠</span>
-          <div>
+          <div className="flex-1 min-w-0">
             <span className={h.type === 'error' ? 'text-red-300 font-medium' : 'text-orange-300 font-medium'}>{h.message}</span>
             <p className="text-gray-500 text-xs mt-0.5">
-              {service} doesn't expose a way to clear this lock directly — click Test on the indexer below to see
-              the live error and confirm whether the underlying cause is fixed yet (Sonarr/Radarr auto-recover once
-              a request actually succeeds).
+              The OK/Failing badge next to each indexer below reflects this live and refreshes automatically every
+              minute — or click Recheck Now for an immediate check. {service} auto-recovers on its own once a
+              request actually succeeds; there's no lock to manually clear.
             </p>
           </div>
+          <button
+            onClick={testAll}
+            disabled={testAllState === 'testing'}
+            className="text-xs px-2.5 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-50 shrink-0"
+          >
+            {testAllState === 'testing' ? 'Checking…' : 'Recheck Now'}
+          </button>
         </div>
       ))}
 
@@ -641,6 +655,23 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
                           {idx.protocol === 'torrent' ? 'TRK' : 'NZB'}
                         </span>
                         <span className="text-sm text-white truncate">{idx.name}</span>
+                        {healthData !== undefined && (
+                          isFlaggedUnhealthy(idx.name) ? (
+                            <span
+                              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium bg-orange-900/60 text-orange-300 shrink-0"
+                              title="Sonarr/Radarr currently reports this indexer as failing — see the banner above"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> Failing
+                            </span>
+                          ) : (
+                            <span
+                              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium bg-green-900/40 text-green-400 shrink-0"
+                              title="No active health warning for this indexer"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-400" /> OK
+                            </span>
+                          )
+                        )}
                         {idx.message && (
                           <span className="text-orange-400 text-xs" title={idx.message.message}>⚠</span>
                         )}
