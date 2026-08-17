@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
@@ -52,6 +52,17 @@ interface ArrIndexer {
   infoLink?: string
   message?: ArrMessage
   [key: string]: unknown
+}
+
+// Sonarr/Radarr auto-disable a failing indexer internally, but (unlike
+// Prowlarr) don't expose a queryable/clearable resource for that lock —
+// the only visible signal is a health check warning like "Indexers
+// unavailable due to failures: X", which is what this reflects.
+interface ArrHealthItem {
+  source: string
+  type: 'ok' | 'notice' | 'warning' | 'error'
+  message: string
+  wikiUrl?: string
 }
 
 interface ArrDownloadClient {
@@ -504,6 +515,18 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
     enabled: pickingSchema,
   })
 
+  // Sonarr/Radarr don't expose a queryable/clearable indexer-lockout resource
+  // the way Prowlarr does (confirmed against a real instance — /indexerstatus
+  // 404s here) — indexer failures only ever surface as health check warnings,
+  // so that's what this reads instead of a fake "disabled until" countdown.
+  const { data: healthData } = useQuery<ArrHealthItem[]>({
+    queryKey: [service, instanceId, 'health'],
+    queryFn: async () => (await api.get(`${arrBase(service, instanceId)}/health`)).data,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+  const indexerHealth = (healthData ?? []).filter((h) => h.source.startsWith('Indexer'))
+
   const toggleFlag = useMutation({
     mutationFn: (indexer: ArrIndexer) => api.put(`${base}/${indexer.id}`, indexer),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: [service, instanceId, 'indexers'] }),
@@ -517,13 +540,18 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
     },
   })
 
+  const [testErrors, setTestErrors] = useState<Record<number, string>>({})
+
   const testOne = async (idx: ArrIndexer) => {
     setTestStates((s) => ({ ...s, [idx.id!]: 'testing' }))
+    setTestErrors((s) => ({ ...s, [idx.id!]: '' }))
     try {
       await api.post(`${base}/test`, idx)
       setTestStates((s) => ({ ...s, [idx.id!]: 'ok' }))
-    } catch {
+      queryClient.invalidateQueries({ queryKey: [service, instanceId, 'health'] })
+    } catch (err) {
       setTestStates((s) => ({ ...s, [idx.id!]: 'fail' }))
+      setTestErrors((s) => ({ ...s, [idx.id!]: extractError(err) }))
     }
   }
 
@@ -562,6 +590,25 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
         {indexers && <span className="text-xs text-gray-600 ml-1">{indexers.length} indexers</span>}
       </div>
 
+      {indexerHealth.map((h, i) => (
+        <div
+          key={i}
+          className={`mb-3 flex items-start gap-3 rounded-lg px-4 py-2.5 text-sm ${
+            h.type === 'error' ? 'bg-red-900/20 border border-red-800/50' : 'bg-orange-900/20 border border-orange-800/50'
+          }`}
+        >
+          <span className={`shrink-0 mt-0.5 ${h.type === 'error' ? 'text-red-400' : 'text-orange-400'}`}>⚠</span>
+          <div>
+            <span className={h.type === 'error' ? 'text-red-300 font-medium' : 'text-orange-300 font-medium'}>{h.message}</span>
+            <p className="text-gray-500 text-xs mt-0.5">
+              {service} doesn't expose a way to clear this lock directly — click Test on the indexer below to see
+              the live error and confirm whether the underlying cause is fixed yet (Sonarr/Radarr auto-recover once
+              a request actually succeeds).
+            </p>
+          </div>
+        </div>
+      ))}
+
       {isLoading ? (
         <div className="space-y-1.5">
           {[...Array(4)].map((_, i) => <div key={i} className="h-11 bg-gray-900 rounded-lg animate-pulse" />)}
@@ -582,8 +629,10 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
             <tbody className="divide-y divide-gray-800/50">
               {indexers.map((idx) => {
                 const testState = testStates[idx.id!] ?? 'idle'
+                const testError = testErrors[idx.id!]
                 return (
-                  <tr key={idx.id} className="hover:bg-gray-800/20 transition-colors group">
+                  <Fragment key={idx.id}>
+                  <tr className="hover:bg-gray-800/20 transition-colors group">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
@@ -620,7 +669,7 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 justify-end">
                         {testState === 'ok' && <span className="text-green-400 text-xs">✓</span>}
-                        {testState === 'fail' && <span className="text-red-400 text-xs">✗</span>}
+                        {testState === 'fail' && <span className="text-red-400 text-xs" title={testError}>✗</span>}
                         <button
                           onClick={() => testOne(idx)}
                           disabled={testState === 'testing'}
@@ -650,6 +699,14 @@ function ArrIndexerSection({ service, instanceId }: { service: ArrService; insta
                       </div>
                     </td>
                   </tr>
+                  {testState === 'fail' && testError && (
+                    <tr>
+                      <td colSpan={4} className="px-4 pb-2.5 -mt-1">
+                        <p className="text-xs text-red-400/80 break-words">{testError}</p>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>
