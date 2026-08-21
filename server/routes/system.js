@@ -3,6 +3,9 @@ import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
 
+// See server/routes/health.js for the full explanation — same optional mount path.
+const PLEX_MOUNT_PATH = process.env.PLEX_MOUNT_PATH || '/mnt/plex'
+
 async function safeFetch(url, timeout = 5000) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeout) })
@@ -58,7 +61,7 @@ async function getGlances(host, port = 61208, includeProcesses = false) {
     const used    = plexDrives.reduce((s, d) => s + d.used,  0)
     const free    = plexDrives.reduce((s, d) => s + d.free,  0)
     disks.unshift({
-      mount:   '/mnt/plex',
+      mount:   PLEX_MOUNT_PATH,
       label:   'Plex Pool',
       used, total, free,
       percent: Math.round((used / total) * 100),

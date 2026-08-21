@@ -2,14 +2,24 @@ services:
   mediaops:
     build: .
     container_name: mediaops
-    network_mode: host
+    ports:
+      - "8990:8080"
     volumes:
       - /opt/mediaops/config:/app/config
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /mnt/plex:/mnt/plex:ro
+      # Optional — mounting the Docker socket enables the System page's
+      # container list, restart, log viewer, and update-check features.
+      # Grants this container control over every other container on the
+      # host, so only enable it if you're comfortable with that.
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Optional — mount your media library here to enable the low-disk-space
+      # alert on the Dashboard/System pages. If your mount path isn't
+      # /mnt/plex, also set PLEX_MOUNT_PATH below to match.
+      # - /path/to/your/media:/mnt/plex:ro
     environment:
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - NODE_ENV=production
+      # Required if any of your services use self-signed HTTPS certificates
+      # (common with Plex). Remove if all your services have valid certs.
       - NODE_TLS_REJECT_UNAUTHORIZED=0
-      - PORT=8990
+      # - PLEX_MOUNT_PATH=/mnt/plex
     restart: unless-stopped

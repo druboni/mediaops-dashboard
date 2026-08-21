@@ -4,6 +4,9 @@ import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 
+// See server/routes/health.js for the full explanation — same optional mount path.
+const PLEX_MOUNT_PATH = process.env.PLEX_MOUNT_PATH || '/mnt/plex'
+
 async function getDiskUsage(path) {
   try {
     const s = await statfs(path)
@@ -315,7 +318,7 @@ export default async function dashboardRoutes(fastify) {
         on('huntarr')     ? getSimpleHealth(at('huntarr').url, '/api/status', arrH(at('huntarr').key)) : null,
         on('requestrr')   ? getSimpleHealth(at('requestrr').url, '/')                     : null,
         on('tautulli')    ? getTautulliData(at('tautulli').url, at('tautulli').key)       : null,
-        getDiskUsage('/mnt/plex'),
+        getDiskUsage(PLEX_MOUNT_PATH),
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}

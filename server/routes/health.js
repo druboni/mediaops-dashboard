@@ -2,6 +2,12 @@ import { statfs } from 'fs/promises'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 
+// Optional — only relevant if you mount your media library volume into the
+// container and want a low-disk-space alert. Defaults to /mnt/plex to match
+// this project's own docker-compose.yml; set to whatever path you mount it
+// at, or leave unmounted entirely (the check just silently skips).
+const PLEX_MOUNT_PATH = process.env.PLEX_MOUNT_PATH || '/mnt/plex'
+
 async function safeFetch(url, headers = {}, timeout = 8000) {
   try {
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeout) })
@@ -50,7 +56,7 @@ export default async function healthRoutes(fastify) {
 
     // Plex drive low-space alert: warning under 10% free, error under 5%
     try {
-      const s = await statfs('/mnt/plex')
+      const s = await statfs(PLEX_MOUNT_PATH)
       const total = s.blocks * s.bsize
       const free = s.bavail * s.bsize
       if (total > 0) {
