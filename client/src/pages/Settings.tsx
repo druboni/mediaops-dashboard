@@ -323,9 +323,10 @@ export default function Settings() {
           <a href="https://nicolargo.github.io/glances/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
             Glances
           </a>{' '}
-          running in web mode (<code className="text-gray-400">glances -w</code>). GPU stats are optional and expect
-          a JSON endpoint at the given port returning <code className="text-gray-400">gpu_util</code>,{' '}
-          <code className="text-gray-400">mem_util</code>, <code className="text-gray-400">temp</code>, etc.
+          running in web mode (<code className="text-gray-400">glances -w</code>) — Windows, Linux, and macOS all
+          work. GPU stats show up automatically via Glances' own GPU plugin if it detects one; the optional GPU
+          port field is only for a separate custom endpoint if you want richer stats (VRAM in MB, power draw)
+          than Glances reports on its own.
         </p>
         <MonitoredServersBlock servers={monitoredServers} onChange={setMonitoredServers} />
       </section>

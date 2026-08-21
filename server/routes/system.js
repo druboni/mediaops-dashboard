@@ -20,22 +20,56 @@ async function safeFetch(url, timeout = 5000) {
 // GPU-relevant process name fragments — these get a highlighted badge in the UI
 const GPU_PROCESS_NAMES = ['plex transcode', 'ffmpeg', 'transcode', 'nvenc', 'cuda', 'plex media server']
 
+// Glances rewrote its REST API from /api/3 to /api/4 (different base path,
+// renamed network fields) in recent versions, and older installs may still
+// only serve /api/3 — detect which one a given host actually speaks rather
+// than assuming, so both old and current Glances installs work.
+async function detectGlancesApiVersion(host, port) {
+  try {
+    const res = await fetch(`http://${host}:${port}/api/4/cpu`, { signal: AbortSignal.timeout(3000) })
+    if (res.ok) return '4'
+  } catch { /* fall through to v3 */ }
+  return '3'
+}
+
+// Maps Glances' own native GPU plugin (available on any OS Glances runs on,
+// via nvidia-ml/gpustat — no extra setup) into the same shape the custom
+// getGpu() sidecar endpoint returns. Used as a fallback when a monitored
+// server doesn't have its own GPU stats port configured.
+function mapGlancesGpu(data) {
+  const g = Array.isArray(data) ? data[0] : null
+  if (!g) return null
+  return {
+    name: g.name ?? 'GPU',
+    gpu_util: g.proc ?? 0,
+    mem_util: g.mem ?? 0,
+    mem_used: 0,
+    mem_total: 0,
+    temp: g.temperature ?? 0,
+    power_draw: 0,
+    power_limit: 0,
+  }
+}
+
 async function getGlances(host, port = 61208, includeProcesses = false) {
-  const base = `http://${host}:${port}/api/3`
+  const apiVersion = await detectGlancesApiVersion(host, port)
+  const base = `http://${host}:${port}/api/${apiVersion}`
   const fetches = [
     safeFetch(`${base}/cpu`),
     safeFetch(`${base}/mem`),
     safeFetch(`${base}/fs`),
     safeFetch(`${base}/network`),
+    safeFetch(`${base}/gpu`),
   ]
-  if (includeProcesses) fetches.push(safeFetch(`${base}/processlist`))
+  if (includeProcesses) fetches.push(safeFetch(`${base}/processlist`, 10_000))
 
-  const [cpu, mem, fs, net, procs] = await Promise.allSettled(fetches)
+  const [cpu, mem, fs, net, glancesGpu, procs] = await Promise.allSettled(fetches)
 
   const cpuVal   = cpu.status   === 'fulfilled' && cpu.value.ok   ? cpu.value.data   : null
   const memVal   = mem.status   === 'fulfilled' && mem.value.ok   ? mem.value.data   : null
   const fsVal    = fs.status    === 'fulfilled' && fs.value.ok    ? fs.value.data    : []
   const netVal   = net.status   === 'fulfilled' && net.value.ok   ? net.value.data   : []
+  const glancesGpuVal = glancesGpu.status === 'fulfilled' && glancesGpu.value.ok ? mapGlancesGpu(glancesGpu.value.data) : null
   const procsVal = includeProcesses && procs && procs.status === 'fulfilled' && procs.value.ok
     ? procs.value.data : []
 
@@ -45,7 +79,7 @@ async function getGlances(host, port = 61208, includeProcesses = false) {
         .filter(f => !SKIP_FS.includes(f.device_name) && f.size > 1e8)
         .map(f => ({
           mount:   f.mnt_point,
-          label:   f.mnt_point === '/' ? 'OS' : f.mnt_point.split('/').pop(),
+          label:   f.mnt_point === '/' ? 'OS' : (f.mnt_point.split(/[/\\]/).filter(Boolean).pop() || f.mnt_point),
           used:    f.used,
           total:   f.size,
           free:    f.free,
@@ -70,11 +104,20 @@ async function getGlances(host, port = 61208, includeProcesses = false) {
   }
 
   const SKIP_NET = ['lo', 'docker0', 'virbr0', 'br-']
+  // Glances v4 renamed these fields (rx/tx/cumulative_* → bytes_*_rate_per_sec/
+  // bytes_*_gauge) — support both so older and current Glances installs work.
   const network = Array.isArray(netVal)
     ? netVal
-        .filter(n => !SKIP_NET.some(s => n.interface_name.startsWith(s)) && (n.rx > 0 || n.tx > 0 || n.interface_name.startsWith('en') || n.interface_name.startsWith('wl')))
+        .map(n => ({
+          iface:   n.interface_name,
+          rx:      n.rx ?? n.bytes_recv_rate_per_sec ?? n.bytes_recv ?? 0,
+          tx:      n.tx ?? n.bytes_sent_rate_per_sec ?? n.bytes_sent ?? 0,
+          rxTotal: n.cumulative_rx ?? n.bytes_recv_gauge ?? 0,
+          txTotal: n.cumulative_tx ?? n.bytes_sent_gauge ?? 0,
+        }))
+        .filter(n => !SKIP_NET.some(s => n.iface.startsWith(s))
+          && (n.rx > 0 || n.tx > 0 || /^(en|wl|eth|Ethernet|Wi-Fi)/.test(n.iface)))
         .slice(0, 3)
-        .map(n => ({ iface: n.interface_name, rx: n.rx, tx: n.tx, rxTotal: n.cumulative_rx, txTotal: n.cumulative_tx }))
     : []
 
   // Build process list — sort by CPU desc, take top 8, tag GPU-likely ones
@@ -98,6 +141,7 @@ async function getGlances(host, port = 61208, includeProcesses = false) {
     disks,
     network,
     processList,
+    glancesGpu: glancesGpuVal,
   }
 }
 
@@ -289,13 +333,18 @@ export default async function systemRoutes(fastify) {
           ])
           const stats = glances.status === 'fulfilled' && glances.value
             ? glances.value
-            : { cpu: null, mem: null, disks: [], network: [], processList: [] }
+            : { cpu: null, mem: null, disks: [], network: [], processList: [], glancesGpu: null }
+          // Prefer the custom GPU sidecar (richer stats: VRAM in MB, power
+          // draw) when configured; otherwise fall back to whatever Glances'
+          // own native GPU plugin reported, if anything.
+          const customGpu = gpu.status === 'fulfilled' ? gpu.value : null
+          const { glancesGpu: nativeGpu, ...restStats } = stats
           return {
             id: s.id,
             name: s.name,
             host: s.host,
-            ...stats,
-            gpu: gpu.status === 'fulfilled' ? gpu.value : null,
+            ...restStats,
+            gpu: customGpu ?? nativeGpu,
           }
         })
       ),
