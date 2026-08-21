@@ -54,7 +54,8 @@ interface ProcessInfo {
 }
 
 interface ServerStats {
-  label: string
+  id: string
+  name: string
   host: string | null
   cpu: CpuInfo | null
   mem: MemInfo | null
@@ -74,8 +75,7 @@ interface ContainerInfo {
 }
 
 interface SystemData {
-  plexgpu: ServerStats
-  arr: ServerStats
+  servers: ServerStats[]
   containers: ContainerInfo[] | null
 }
 
@@ -360,7 +360,7 @@ export default function System() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white mb-1">System Stats</h1>
-          <p className="text-sm text-gray-500">CPU, RAM, storage, and network across both servers</p>
+          <p className="text-sm text-gray-500">CPU, RAM, storage, and network for whatever servers you've configured</p>
         </div>
         {dataUpdatedAt > 0 && (
           <span className="text-xs text-gray-600">Updated {timeAgo(dataUpdatedAt)}</span>
@@ -381,28 +381,29 @@ export default function System() {
 
       {error && (
         <div className="bg-red-900/20 border border-red-800/50 rounded-lg px-4 py-3 text-sm text-red-400">
-          Failed to load system stats — make sure Glances is running on your servers in web mode (glances -w)
+          Failed to load system stats
         </div>
       )}
 
       {data && (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <div>
-              <h2 className="section-label">{data.plexgpu.label}</h2>
-              {data.plexgpu.host && (
-                <p className="text-xs text-gray-600 mb-3 font-mono">{data.plexgpu.host}</p>
-              )}
-              <ServerCard server={data.plexgpu} />
+          {data.servers.length === 0 ? (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-8 text-center text-sm text-gray-500 mb-6">
+              No servers configured yet — add one in Settings → Monitored Servers to see live CPU/RAM/disk/network stats here.
             </div>
-            <div>
-              <h2 className="section-label">{data.arr.label}</h2>
-              {data.arr.host && (
-                <p className="text-xs text-gray-600 mb-3 font-mono">{data.arr.host}</p>
-              )}
-              <ServerCard server={data.arr} />
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {data.servers.map((server) => (
+                <div key={server.id}>
+                  <h2 className="section-label">{server.name}</h2>
+                  {server.host && (
+                    <p className="text-xs text-gray-600 mb-3 font-mono">{server.host}</p>
+                  )}
+                  <ServerCard server={server} />
+                </div>
+              ))}
             </div>
-          </div>
+          )}
 
           {/* Docker Containers */}
           {data.containers && (

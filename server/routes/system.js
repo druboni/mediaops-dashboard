@@ -210,9 +210,9 @@ async function getDockerContainers() {
   }
 }
 
-async function getGpu(host) {
+async function getGpu(host, port) {
   try {
-    const res = await fetch(`http://${host}:61209`, { signal: AbortSignal.timeout(3000) })
+    const res = await fetch(`http://${host}:${port}`, { signal: AbortSignal.timeout(3000) })
     if (!res.ok) return null
     const d = await res.json()
     return d.error ? null : d
@@ -278,40 +278,34 @@ export default async function systemRoutes(fastify) {
 
   fastify.get('/', async () => {
     const config = await getConfig()
-    const svcs = config.services
+    const monitored = config.monitoredServers ?? []
 
-    const plexUrl  = svcs.plex?.enabled ? svcs.plex.url.replace(/\/$/, '') : null
-    const arrUrl   = (svcs.sonarr?.enabled ? svcs.sonarr.url : svcs.radarr?.enabled ? svcs.radarr.url : null)?.replace(/\/$/, '')
-
-    const plexHost = plexUrl ? new URL(plexUrl).hostname : null
-    const arrHost  = arrUrl  ? new URL(arrUrl).hostname  : null
-
-    const [plexGlances, arrGlances, gpu, containers] = await Promise.allSettled([
-      plexHost ? getGlances(plexHost, 61208, true) : null,  // include processes for GPU host
-      arrHost  ? getGlances(arrHost)  : null,
-      plexHost ? getGpu(plexHost)     : null,
+    const [serverResults, containers] = await Promise.allSettled([
+      Promise.allSettled(
+        monitored.map(async (s) => {
+          const [glances, gpu] = await Promise.allSettled([
+            getGlances(s.host, s.glancesPort || 61208, true),
+            s.gpuPort ? getGpu(s.host, s.gpuPort) : null,
+          ])
+          const stats = glances.status === 'fulfilled' && glances.value
+            ? glances.value
+            : { cpu: null, mem: null, disks: [], network: [], processList: [] }
+          return {
+            id: s.id,
+            name: s.name,
+            host: s.host,
+            ...stats,
+            gpu: gpu.status === 'fulfilled' ? gpu.value : null,
+          }
+        })
+      ),
       getDockerContainers(),
     ])
 
-    const plexStats = plexGlances.status === 'fulfilled' && plexGlances.value
-      ? plexGlances.value
-      : { cpu: null, mem: null, disks: [], network: [], processList: [] }
-
     return {
-      plexgpu: {
-        label: 'Media Server (plexgpu)',
-        host: plexHost,
-        ...plexStats,
-        gpu: gpu.status === 'fulfilled' ? gpu.value : null,
-      },
-      arr: {
-        label: 'Arr Server',
-        host: arrHost,
-        ...(arrGlances.status === 'fulfilled' && arrGlances.value
-          ? arrGlances.value
-          : { cpu: null, mem: null, disks: [], network: [], processList: [] }),
-        gpu: null,
-      },
+      servers: serverResults.status === 'fulfilled'
+        ? serverResults.value.map((r) => (r.status === 'fulfilled' ? r.value : null)).filter(Boolean)
+        : [],
       containers: containers.status === 'fulfilled' ? containers.value : null,
     }
   })

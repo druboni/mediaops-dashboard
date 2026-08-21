@@ -47,6 +47,14 @@ export interface ArrInstance {
   apiKey: string
 }
 
+export interface MonitoredServer {
+  id: string
+  name: string
+  host: string
+  glancesPort?: number
+  gpuPort?: number
+}
+
 export interface Config {
   services: Record<ServiceName, ServiceConfig>
   links?: QuickLink[]
@@ -54,4 +62,5 @@ export interface Config {
   autoDeleteAfterImport?: boolean
   notifications?: NotificationsConfig
   additionalInstances?: Record<ArrInstanceType, ArrInstance[]>
+  monitoredServers?: MonitoredServer[]
 }

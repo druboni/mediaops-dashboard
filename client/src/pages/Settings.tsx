@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useConfig } from '../store/config'
 import { useTheme, THEMES } from '../store/theme'
 import api from '../services/api'
-import type { Config, ServiceName, ServiceConfig, QuickLink, NotificationsConfig, ArrInstanceType, ArrInstance } from '../types'
+import type { Config, ServiceName, ServiceConfig, QuickLink, NotificationsConfig, ArrInstanceType, ArrInstance, MonitoredServer } from '../types'
 
 interface ServiceMeta {
   label: string
@@ -57,6 +57,7 @@ export default function Settings() {
   const [additionalInstances, setAdditionalInstances] = useState<Record<ArrInstanceType, ArrInstance[]>>({
     sonarr: [], radarr: [], lidarr: [],
   })
+  const [monitoredServers, setMonitoredServers] = useState<MonitoredServer[]>([])
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [notifications, setNotifications] = useState<NotificationsConfig>({
     discordWebhookUrl: '', mediaAddedEnabled: false, webhookSecret: '',
@@ -89,6 +90,7 @@ export default function Settings() {
       setAutoDeleteAfterImport(config.autoDeleteAfterImport)
     if (config?.notifications) setNotifications(config.notifications)
     if (config?.additionalInstances) setAdditionalInstances(config.additionalInstances)
+    if (config?.monitoredServers) setMonitoredServers(config.monitoredServers)
   }, [config])
 
   useEffect(() => {
@@ -121,7 +123,7 @@ export default function Settings() {
     setSaving(true)
     setSaved(false)
     try {
-      await updateConfig({ ...config!, services, links, autoDeleteAfterImport, notifications, additionalInstances })
+      await updateConfig({ ...config!, services, links, autoDeleteAfterImport, notifications, additionalInstances, monitoredServers })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } finally {
@@ -311,6 +313,21 @@ export default function Settings() {
             />
           ))}
         </div>
+      </section>
+
+      {/* Monitored Servers */}
+      <section className="mt-10 pt-8 border-t border-gray-800">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Monitored Servers</h2>
+        <p className="text-xs text-gray-600 mb-4">
+          Hosts to show live CPU/RAM/disk/network stats for on the System page. Each one needs{' '}
+          <a href="https://nicolargo.github.io/glances/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+            Glances
+          </a>{' '}
+          running in web mode (<code className="text-gray-400">glances -w</code>). GPU stats are optional and expect
+          a JSON endpoint at the given port returning <code className="text-gray-400">gpu_util</code>,{' '}
+          <code className="text-gray-400">mem_util</code>, <code className="text-gray-400">temp</code>, etc.
+        </p>
+        <MonitoredServersBlock servers={monitoredServers} onChange={setMonitoredServers} />
       </section>
 
       {/* Downloads */}
@@ -901,6 +918,91 @@ function InstanceTypeBlock({
         <button
           onClick={add}
           disabled={!draft.name.trim() || !draft.url.trim()}
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+        >
+          + Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MonitoredServersBlock({
+  servers, onChange,
+}: {
+  servers: MonitoredServer[]
+  onChange: (next: MonitoredServer[]) => void
+}) {
+  const [draft, setDraft] = useState<{ name: string; host: string; glancesPort: string; gpuPort: string }>({
+    name: '', host: '', glancesPort: '', gpuPort: '',
+  })
+
+  const add = () => {
+    if (!draft.name.trim() || !draft.host.trim()) return
+    const id = crypto.randomUUID()
+    onChange([...servers, {
+      id,
+      name: draft.name.trim(),
+      host: draft.host.trim(),
+      glancesPort: draft.glancesPort ? Number(draft.glancesPort) : undefined,
+      gpuPort: draft.gpuPort ? Number(draft.gpuPort) : undefined,
+    }])
+    setDraft({ name: '', host: '', glancesPort: '', gpuPort: '' })
+  }
+
+  return (
+    <div>
+      <div className="space-y-2 mb-3">
+        {servers.map((s) => (
+          <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 flex items-center gap-2">
+            <span className="text-sm text-white shrink-0">{s.name}</span>
+            <span className="text-xs text-gray-600 truncate flex-1 font-mono">
+              {s.host}:{s.glancesPort ?? 61208}{s.gpuPort ? ` · GPU :${s.gpuPort}` : ''}
+            </span>
+            <button
+              onClick={() => onChange(servers.filter((x) => x.id !== s.id))}
+              className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {servers.length === 0 && (
+          <p className="text-xs text-gray-600 py-1">No servers configured — the System page will be empty until you add one</p>
+        )}
+      </div>
+      <div className="flex gap-2 items-end flex-wrap">
+        <input
+          type="text"
+          placeholder="Name (e.g. Media Server)"
+          value={draft.name}
+          onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
+          className="input w-40"
+        />
+        <input
+          type="text"
+          placeholder="Host (e.g. 192.168.1.50)"
+          value={draft.host}
+          onChange={(e) => setDraft((p) => ({ ...p, host: e.target.value }))}
+          className="input flex-1 min-w-[10rem]"
+        />
+        <input
+          type="number"
+          placeholder="Glances port (61208)"
+          value={draft.glancesPort}
+          onChange={(e) => setDraft((p) => ({ ...p, glancesPort: e.target.value }))}
+          className="input w-36"
+        />
+        <input
+          type="number"
+          placeholder="GPU port (optional)"
+          value={draft.gpuPort}
+          onChange={(e) => setDraft((p) => ({ ...p, gpuPort: e.target.value }))}
+          className="input w-36"
+        />
+        <button
+          onClick={add}
+          disabled={!draft.name.trim() || !draft.host.trim()}
           className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
         >
           + Add

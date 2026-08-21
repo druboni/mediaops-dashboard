@@ -49,6 +49,10 @@ const DEFAULT_CONFIG = {
     radarr: [],
     lidarr: [],
   },
+  // User-defined hosts for the System page's live CPU/RAM/disk/GPU stats
+  // (each needs Glances running in web mode: `glances -w`). Empty by default
+  // — no server topology is assumed.
+  monitoredServers: [],
 }
 
 const INSTANCE_TYPES = ['sonarr', 'radarr', 'lidarr']
@@ -139,6 +143,7 @@ export default async function configRoutes(fastify) {
     if (request.body.additionalInstances && typeof request.body.additionalInstances === 'object') {
       updated.additionalInstances = { ...current.additionalInstances, ...request.body.additionalInstances }
     }
+    if (Array.isArray(request.body.monitoredServers)) updated.monitoredServers = request.body.monitoredServers
     await saveConfig(updated)
     return updated
   })
