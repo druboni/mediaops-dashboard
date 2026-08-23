@@ -466,7 +466,7 @@ function DiskUsageCard({ disk }: { disk: { total: number; free: number; used: nu
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
       <p className={`text-2xl font-bold tabular-nums ${color}`}>{pct.toFixed(1)}%</p>
-      <p className="text-xs text-gray-500 mt-0.5">Plex Drive Used</p>
+      <p className="text-xs text-gray-500 mt-0.5">Plex Drive Used · {formatDiskBytes(disk.used)}</p>
       <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
         <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
       </div>
