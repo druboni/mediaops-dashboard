@@ -82,7 +82,7 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
 ### System
 - Live CPU, RAM, disk, network, and GPU stats (via [Glances](https://nicolargo.github.io/glances/)) for any number of servers you add in Settings → Monitored Servers
 - **Docker container list** (requires mounting the Docker socket — see Configuration below): status, ports, restart with confirmation, recent log viewer, and an update-available check that compares your locally running image against the registry (Docker Hub, ghcr.io, and mirrors like lscr.io are all supported)
-- **Speed test** (optional, per server) — run [`scripts/speedtest-sidecar.py`](scripts/speedtest-sidecar.py) on a monitored server and set its speedtest port in Settings to get a one-click internet speed test from that server's own connection
+- **Speed test** (optional, per server) — run [`scripts/speedtest-sidecar.py`](scripts/speedtest-sidecar.py) on a monitored server (requires [Ookla's `speedtest` CLI](https://www.speedtest.net/apps/cli) already installed there) and set its speedtest port in Settings to get a one-click internet speed test from that server's own connection
 
 ### Notifications
 - Discord, [ntfy](https://ntfy.sh), Pushover, and Telegram — fires from Sonarr/Radarr's own webhook whenever new media is imported, independent of Plex
@@ -430,6 +430,9 @@ mediaops-dashboard/
 
 **Low-disk-space alert never appears**
 - Mount your media library volume (e.g. as `/mnt/plex`) — see the Quick Start compose file. If you mount it at a different path, set `PLEX_MOUNT_PATH` to match.
+
+**No "Speed Test" button for a monitored server**
+- It only appears once that server has a speedtest port set in Settings, which requires `scripts/speedtest-sidecar.py` actually running on that server. Confirm it's up with `curl http://<server>:<port>/speedtest` directly from that server (it should return JSON after 10-30+ seconds) — a common cause is Ookla's `speedtest` CLI not being installed or not on `PATH` for the user running the sidecar.
 
 ---
 
