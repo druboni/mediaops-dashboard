@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
+import type { SpeedtestResult } from '../types'
 
 interface DiskInfo {
   mount: string
@@ -63,6 +64,7 @@ interface ServerStats {
   network: NetInfo[]
   gpu: GpuInfo | null
   processList: ProcessInfo[]
+  hasSpeedtest: boolean
 }
 
 interface ContainerInfo {
@@ -265,6 +267,66 @@ function ServerCard({ server }: { server: ServerStats }) {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Speed Test */}
+      {server.hasSpeedtest && <SpeedtestCard serverId={server.id} />}
+    </div>
+  )
+}
+
+function SpeedtestCard({ serverId }: { serverId: string }) {
+  const speedtest = useMutation({
+    mutationFn: async () => (await api.get<SpeedtestResult>(`/system/servers/${serverId}/speedtest`)).data,
+  })
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Speed Test</h3>
+        <button
+          onClick={() => speedtest.mutate()}
+          disabled={speedtest.isPending}
+          className="text-xs px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-50"
+        >
+          {speedtest.isPending ? 'Testing…' : speedtest.isSuccess ? 'Run again' : 'Run test'}
+        </button>
+      </div>
+
+      {speedtest.isPending && (
+        <p className="text-xs text-gray-600">Running — this can take up to a minute…</p>
+      )}
+
+      {speedtest.isError && (
+        <p className="text-xs text-red-400">{extractErrorMessage(speedtest.error) ?? 'Speed test failed'}</p>
+      )}
+
+      {speedtest.data && (
+        <div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-lg font-bold text-green-400 tabular-nums">{speedtest.data.download.toFixed(0)}</p>
+              <p className="text-[10px] text-gray-600">Mbps ↓ down</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold text-blue-400 tabular-nums">{speedtest.data.upload.toFixed(0)}</p>
+              <p className="text-[10px] text-gray-600">Mbps ↑ up</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold text-white tabular-nums">{speedtest.data.ping.toFixed(0)}</p>
+              <p className="text-[10px] text-gray-600">ms ping</p>
+            </div>
+          </div>
+          {(speedtest.data.server || speedtest.data.isp) && (
+            <p className="text-[10px] text-gray-700 mt-2 truncate">
+              {[speedtest.data.server, speedtest.data.isp].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!speedtest.isPending && !speedtest.isError && !speedtest.data && (
+        <p className="text-xs text-gray-600">Not run yet</p>
       )}
     </div>
   )

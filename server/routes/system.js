@@ -263,6 +263,20 @@ async function getGpu(host, port) {
   } catch { return null }
 }
 
+// Same sidecar pattern as the GPU stats port — a small HTTP endpoint you run
+// on the monitored server itself (see scripts/speedtest-sidecar.py) that
+// actually runs the test against that server's own internet connection.
+// Real speedtests take a while, hence the long timeout.
+async function runSpeedtest(host, port) {
+  const res = await fetch(`http://${host}:${port}/speedtest`, { signal: AbortSignal.timeout(60_000) })
+  if (!res.ok) throw new Error(`Speedtest sidecar returned HTTP ${res.status}`)
+  const d = await res.json()
+  if (typeof d.download !== 'number' || typeof d.upload !== 'number') {
+    throw new Error('Speedtest sidecar returned an unexpected response shape')
+  }
+  return d
+}
+
 // Splits an image reference like "lscr.io/linuxserver/radarr:latest" or
 // "portainer/portainer-ce:latest" or "alpine" into a registry API host, repo
 // path, and tag — following the same "does the first segment look like a
@@ -345,6 +359,7 @@ export default async function systemRoutes(fastify) {
             host: s.host,
             ...restStats,
             gpu: customGpu ?? nativeGpu,
+            hasSpeedtest: !!s.speedtestPort,
           }
         })
       ),
@@ -405,6 +420,25 @@ export default async function systemRoutes(fastify) {
 
       return { updateAvailable: remoteDigest !== localDigest, localDigest, remoteDigest }
     } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  fastify.get('/servers/:id/speedtest', async (request, reply) => {
+    const { id } = request.params
+    const config = await getConfig()
+    const server = (config.monitoredServers ?? []).find((s) => s.id === id)
+    if (!server) return reply.status(404).send({ error: 'Unknown monitored server' })
+    if (!server.speedtestPort) return reply.status(400).send({ error: 'No speedtest port configured for this server' })
+
+    try {
+      const result = await runSpeedtest(server.host, server.speedtestPort)
+      addLog('info', `[system] Speedtest for ${server.name}: ${result.download.toFixed(0)}↓ / ${result.upload.toFixed(0)}↑ Mbps`, {
+        server: server.name, download: result.download, upload: result.upload, ping: result.ping,
+      })
+      return result
+    } catch (err) {
+      addLog('error', `[system] Speedtest failed for ${server.name}: ${err.message}`, { server: server.name, error: err.message })
       return reply.status(502).send({ error: err.message })
     }
   })

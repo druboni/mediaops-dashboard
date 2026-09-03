@@ -4,3 +4,4 @@ config/config.json
 config/app.log*
 config/backups/
 .env
+__pycache__/

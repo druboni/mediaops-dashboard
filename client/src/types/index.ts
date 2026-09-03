@@ -53,6 +53,15 @@ export interface MonitoredServer {
   host: string
   glancesPort?: number
   gpuPort?: number
+  speedtestPort?: number
+}
+
+export interface SpeedtestResult {
+  download: number
+  upload: number
+  ping: number
+  server?: string
+  isp?: string
 }
 
 export interface Config {

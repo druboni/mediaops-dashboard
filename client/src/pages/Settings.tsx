@@ -326,7 +326,11 @@ export default function Settings() {
           running in web mode (<code className="text-gray-400">glances -w</code>) — Windows, Linux, and macOS all
           work. GPU stats show up automatically via Glances' own GPU plugin if it detects one; the optional GPU
           port field is only for a separate custom endpoint if you want richer stats (VRAM in MB, power draw)
-          than Glances reports on its own.
+          than Glances reports on its own. The optional speedtest port enables a "Speed Test" button on the
+          System page for that server — run{' '}
+          <code className="text-gray-400">scripts/speedtest-sidecar.py</code> (from this repo) on the server
+          itself and point this at that port, since testing a server's real internet speed has to happen from
+          that server, not from wherever MediaOps runs.
         </p>
         <MonitoredServersBlock servers={monitoredServers} onChange={setMonitoredServers} />
       </section>
@@ -934,8 +938,8 @@ function MonitoredServersBlock({
   servers: MonitoredServer[]
   onChange: (next: MonitoredServer[]) => void
 }) {
-  const [draft, setDraft] = useState<{ name: string; host: string; glancesPort: string; gpuPort: string }>({
-    name: '', host: '', glancesPort: '', gpuPort: '',
+  const [draft, setDraft] = useState<{ name: string; host: string; glancesPort: string; gpuPort: string; speedtestPort: string }>({
+    name: '', host: '', glancesPort: '', gpuPort: '', speedtestPort: '',
   })
 
   const add = () => {
@@ -947,8 +951,9 @@ function MonitoredServersBlock({
       host: draft.host.trim(),
       glancesPort: draft.glancesPort ? Number(draft.glancesPort) : undefined,
       gpuPort: draft.gpuPort ? Number(draft.gpuPort) : undefined,
+      speedtestPort: draft.speedtestPort ? Number(draft.speedtestPort) : undefined,
     }])
-    setDraft({ name: '', host: '', glancesPort: '', gpuPort: '' })
+    setDraft({ name: '', host: '', glancesPort: '', gpuPort: '', speedtestPort: '' })
   }
 
   return (
@@ -958,7 +963,7 @@ function MonitoredServersBlock({
           <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 flex items-center gap-2">
             <span className="text-sm text-white shrink-0">{s.name}</span>
             <span className="text-xs text-gray-600 truncate flex-1 font-mono">
-              {s.host}:{s.glancesPort ?? 61208}{s.gpuPort ? ` · GPU :${s.gpuPort}` : ''}
+              {s.host}:{s.glancesPort ?? 61208}{s.gpuPort ? ` · GPU :${s.gpuPort}` : ''}{s.speedtestPort ? ` · Speedtest :${s.speedtestPort}` : ''}
             </span>
             <button
               onClick={() => onChange(servers.filter((x) => x.id !== s.id))}
@@ -1000,6 +1005,13 @@ function MonitoredServersBlock({
           value={draft.gpuPort}
           onChange={(e) => setDraft((p) => ({ ...p, gpuPort: e.target.value }))}
           className="input w-36"
+        />
+        <input
+          type="number"
+          placeholder="Speedtest port (optional)"
+          value={draft.speedtestPort}
+          onChange={(e) => setDraft((p) => ({ ...p, speedtestPort: e.target.value }))}
+          className="input w-40"
         />
         <button
           onClick={add}

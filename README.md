@@ -80,8 +80,9 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
 - Languages — view-only list of enabled/available languages (Bazarr keeps provider credentials and language config in one settings blob with no per-item write API, so this is deliberately read-only rather than guessing at that schema)
 
 ### System
-- Live CPU, RAM, disk, network, and GPU stats (via [Glances](https://nicolargo.github.io/glances/)) for your Plex/GPU host and your arr-stack host
+- Live CPU, RAM, disk, network, and GPU stats (via [Glances](https://nicolargo.github.io/glances/)) for any number of servers you add in Settings → Monitored Servers
 - **Docker container list** (requires mounting the Docker socket — see Configuration below): status, ports, restart with confirmation, recent log viewer, and an update-available check that compares your locally running image against the registry (Docker Hub, ghcr.io, and mirrors like lscr.io are all supported)
+- **Speed test** (optional, per server) — run [`scripts/speedtest-sidecar.py`](scripts/speedtest-sidecar.py) on a monitored server and set its speedtest port in Settings to get a one-click internet speed test from that server's own connection
 
 ### Notifications
 - Discord, [ntfy](https://ntfy.sh), Pushover, and Telegram — fires from Sonarr/Radarr's own webhook whenever new media is imported, independent of Plex
