@@ -317,11 +317,22 @@ const mapArrHistory = (records) =>
 
 const MS_PER_DAY = 86_400_000
 
-// Two keys per title: one with the year for precision, one without as a fallback,
-// since Plex and TMDB disagree about release years more often than you'd hope.
+// Plex routinely disambiguates a title with a trailing year — "Yellowstone (2018)"
+// — where the *arr title is just "Yellowstone". Normalizing naively turns those
+// into "yellowstone2018" vs "yellowstone" and they never match, so strip the
+// suffix and keep the year as a separate, more precise key.
+const stripYearSuffix = (title) => String(title || '').replace(/\s*\((?:19|20)\d{2}\)\s*$/, '')
+
+// Keys are tried most-specific first: title+year, then bare title, then the
+// unstripped form in case an *arr title really does carry the year.
 const watchKeys = (title, year) => {
-  const base = normalize(title)
-  return year ? [`${base}|${year}`, base] : [base]
+  const bare = normalize(stripYearSuffix(title))
+  const full = normalize(title)
+  const keys = []
+  if (year) keys.push(`${bare}|${year}`)
+  keys.push(bare)
+  if (full !== bare) keys.push(full)
+  return keys
 }
 
 async function tautulliLibraryIndex(svc) {
@@ -337,8 +348,12 @@ async function tautulliLibraryIndex(svc) {
   const results = await Promise.allSettled(
     libraries.map((l) =>
       safeFetch(
+        // refresh=true matters: without it Tautulli returns whatever is already
+        // in its media_info_table, which on a real library is a fraction of the
+        // whole thing (904 of 1595 movies on the server this was built against).
+        // Everything missing would otherwise be misreported as an orphan.
         `${base}&cmd=get_library_media_info&section_id=${l.section_id}&length=10000` +
-          `&order_column=file_size&order_dir=desc&refresh=false`,
+          `&order_column=file_size&order_dir=desc&refresh=true`,
         {},
         30000
       )
@@ -377,7 +392,7 @@ async function tautulliLibraryIndex(svc) {
 const lookupWatch = (index, kind, title, year) => {
   if (!index) return undefined
   const target = kind === 'movie' ? index.movies : index.shows
-  for (const key of watchKeys(title, kind === 'movie' ? year : null)) {
+  for (const key of watchKeys(title, year)) {
     const hit = target.get(key)
     if (hit) return hit
   }
