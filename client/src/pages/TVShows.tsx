@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
+import MediaDetail from '../components/MediaDetail'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,16 +39,6 @@ interface SonarrSeries {
 }
 interface QualityProfile { id: number; name: string }
 interface RootFolder { id: number; path: string }
-interface HistoryRecord {
-  id: number
-  eventType: string
-  date: string
-  sourceTitle: string
-  quality?: { quality: { name: string } }
-  series?: { title: string }
-  episode?: { seasonNumber: number; episodeNumber: number; title: string }
-}
-
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function formatBytes(b: number) {
@@ -64,199 +55,6 @@ function seriesProgress(s: SonarrSeries) {
   const total = s.statistics?.episodeCount ?? 0
   const have = s.statistics?.episodeFileCount ?? 0
   return { have, total, pct: total > 0 ? have / total : 0 }
-}
-
-function timeAgo(d: string) {
-  const diff = Date.now() - new Date(d).getTime()
-  const m = Math.floor(diff / 60000)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
-}
-
-const EVENT_LABEL: Record<string, string> = {
-  grabbed: 'Grabbed',
-  downloadFolderImported: 'Imported',
-  downloadFailed: 'Failed',
-  episodeFileDeleted: 'Deleted',
-  episodeFileRenamed: 'Renamed',
-  seriesAdd: 'Added',
-  ignored: 'Ignored',
-}
-
-// ── Detail Panel ───────────────────────────────────────────────────────────
-
-function SeriesDetailPanel({
-  series, profiles, onClose, onUpdate, onDelete, onSearch, onSeasonToggle, isSearching, searchQueued,
-}: {
-  series: SonarrSeries
-  profiles: QualityProfile[]
-  onClose: () => void
-  onUpdate: (s: SonarrSeries) => void
-  onDelete: (s: SonarrSeries, files: boolean) => void
-  onSearch: (s: SonarrSeries) => void
-  onSeasonToggle: (s: SonarrSeries, seasonNumber: number) => void
-  isSearching: boolean
-  searchQueued: boolean
-}) {
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const profileName = profiles.find((p) => p.id === series.qualityProfileId)?.name ?? '—'
-  const { have, total } = seriesProgress(series)
-  const poster = posterUrl(series)
-
-  const { data: history } = useQuery<{ records: HistoryRecord[] }>({
-    queryKey: ['sonarr-series-history', series.id],
-    queryFn: async () => (await api.get('/proxy/sonarr/api/v3/history', {
-      params: { seriesId: series.id, pageSize: 8, sortKey: 'date', sortDirection: 'descending' },
-    })).data,
-    staleTime: 30_000,
-  })
-
-  const displaySeasons = [...(series.seasons ?? [])]
-    .filter((s) => s.seasonNumber > 0)
-    .sort((a, b) => b.seasonNumber - a.seasonNumber)
-
-  return (
-    <div className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 shrink-0">
-        <span className="text-sm font-semibold text-white truncate pr-2">{series.title}</span>
-        <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors shrink-0">✕</button>
-      </div>
-
-      <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
-        {/* Poster + meta */}
-        <div className="flex gap-4">
-          {poster ? (
-            <img src={poster} alt="" className="w-20 rounded-md shrink-0 object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-          ) : (
-            <div className="w-20 h-28 bg-gray-800 rounded-md shrink-0 flex items-center justify-center text-gray-600 text-xs">No poster</div>
-          )}
-          <div className="min-w-0">
-            <p className="text-white font-semibold text-sm">{series.title}</p>
-            <p className="text-gray-500 text-xs mt-0.5">{series.year}{series.network ? ` · ${series.network}` : ''}{series.runtime ? ` · ${series.runtime}m` : ''}</p>
-            <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-medium mt-1 ${
-              series.status === 'continuing' ? 'bg-green-900/60 text-green-400' :
-              series.status === 'ended' ? 'bg-gray-800 text-gray-400' :
-              'bg-yellow-900/60 text-yellow-400'
-            }`}>
-              {series.status.charAt(0).toUpperCase() + series.status.slice(1)}
-            </span>
-            <p className="text-xs text-gray-500 mt-1">{profileName}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{have} / {total} episodes · {formatBytes(series.statistics?.sizeOnDisk ?? 0)}</p>
-          </div>
-        </div>
-
-        {/* Overview */}
-        {series.overview && (
-          <p className="text-xs text-gray-400 leading-relaxed line-clamp-4">{series.overview}</p>
-        )}
-
-        {/* Seasons */}
-        {displaySeasons.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Seasons</p>
-            <div className="space-y-1">
-              {displaySeasons.map((season) => {
-                const stats = season.statistics
-                const have = stats?.episodeFileCount ?? 0
-                const total = stats?.episodeCount ?? 0
-                const pct = total > 0 ? have / total : 0
-                return (
-                  <div key={season.seasonNumber} className="flex items-center gap-3 bg-gray-800/40 rounded-lg px-3 py-2">
-                    <button
-                      onClick={() => onSeasonToggle(series, season.seasonNumber)}
-                      title={season.monitored ? 'Click to unmonitor' : 'Click to monitor'}
-                      className={`w-3 h-3 rounded-full shrink-0 border-2 transition-colors ${
-                        season.monitored ? 'bg-blue-500 border-blue-500' : 'bg-transparent border-gray-600 hover:border-gray-400'
-                      }`}
-                    />
-                    <span className="text-xs text-gray-300 w-16 shrink-0">Season {season.seasonNumber}</span>
-                    <div className="flex-1 bg-gray-700 rounded-full h-1">
-                      <div className="bg-blue-500 h-1 rounded-full" style={{ width: `${Math.round(pct * 100)}%` }} />
-                    </div>
-                    <span className="text-xs text-gray-500 tabular-nums shrink-0">{have}/{total}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* History */}
-        {history?.records && history.records.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">History</p>
-            <div className="space-y-1">
-              {history.records.slice(0, 6).map((h) => (
-                <div key={h.id} className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
-                      h.eventType === 'downloadFolderImported' ? 'bg-green-900/60 text-green-400' :
-                      h.eventType === 'downloadFailed' ? 'bg-red-900/60 text-red-400' :
-                      h.eventType === 'grabbed' ? 'bg-blue-900/60 text-blue-400' :
-                      'bg-gray-800 text-gray-500'
-                    }`}>
-                      {EVENT_LABEL[h.eventType] ?? h.eventType}
-                    </span>
-                    {h.episode && (
-                      <span className="text-xs text-gray-500 truncate">
-                        S{String(h.episode.seasonNumber).padStart(2,'0')}E{String(h.episode.episodeNumber).padStart(2,'0')}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-gray-600 shrink-0">{timeAgo(h.date)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="px-5 py-4 border-t border-gray-800 shrink-0 space-y-2">
-        {showDeleteConfirm ? (
-          <div className="space-y-2">
-            <p className="text-xs text-gray-400">Remove series from Sonarr?</p>
-            <div className="flex gap-2">
-              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 text-xs py-1.5 rounded bg-gray-800 text-gray-400 hover:text-white transition-colors">Cancel</button>
-              <button onClick={() => { onDelete(series, false); setShowDeleteConfirm(false) }} className="flex-1 text-xs py-1.5 rounded bg-red-800 hover:bg-red-700 text-white transition-colors">Remove</button>
-              <button onClick={() => { onDelete(series, true); setShowDeleteConfirm(false) }} className="flex-1 text-xs py-1.5 rounded bg-red-950 border border-red-800 text-red-300 hover:bg-red-900 transition-colors">+Files</button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              onClick={() => onSearch(series)}
-              disabled={isSearching}
-              className={`flex-1 text-xs py-1.5 rounded text-white transition-colors ${
-                searchQueued ? 'bg-green-700' : 'bg-blue-700 hover:bg-blue-600'
-              } disabled:opacity-60`}
-            >
-              {isSearching ? 'Searching…' : searchQueued ? 'Queued!' : 'Search'}
-            </button>
-            <button
-              onClick={() => onUpdate({ ...series, monitored: !series.monitored })}
-              className={`flex-1 text-xs py-1.5 rounded border transition-colors ${
-                series.monitored
-                  ? 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500'
-                  : 'bg-yellow-900/30 border-yellow-700 text-yellow-400 hover:bg-yellow-900/50'
-              }`}
-            >
-              {series.monitored ? 'Monitored' : 'Unmonitored'}
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="text-xs px-3 py-1.5 rounded bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-300 border border-gray-700 hover:border-red-800 transition-colors"
-            >
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }
 
 // ── Add Series Modal ───────────────────────────────────────────────────────
@@ -431,53 +229,6 @@ export default function TVShows() {
     staleTime: 60_000,
   })
 
-  const { data: profiles = [] } = useQuery<QualityProfile[]>({
-    queryKey: ['sonarr-profiles'],
-    queryFn: async () => (await api.get('/proxy/sonarr/api/v3/qualityprofile')).data,
-    enabled,
-    staleTime: 300_000,
-  })
-
-  const updateSeries = useMutation({
-    mutationFn: (s: SonarrSeries) => api.put(`/proxy/sonarr/api/v3/series/${s.id}`, s),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['sonarr-series'] }); setSelected(null) },
-  })
-
-  const deleteSeries = useMutation({
-    mutationFn: ({ s, deleteFiles }: { s: SonarrSeries; deleteFiles: boolean }) =>
-      api.delete(`/proxy/sonarr/api/v3/series/${s.id}`, { params: { deleteFiles } }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['sonarr-series'] }); setSelected(null) },
-  })
-
-  const triggerSearch = useMutation({
-    mutationFn: (s: SonarrSeries) =>
-      api.post('/proxy/sonarr/api/v3/command', { name: 'SeriesSearch', seriesId: s.id }),
-  })
-
-  const toggleSeason = useMutation({
-    mutationFn: ({ s, seasonNumber }: { s: SonarrSeries; seasonNumber: number }) => {
-      const updated = {
-        ...s,
-        seasons: s.seasons.map((season) =>
-          season.seasonNumber === seasonNumber ? { ...season, monitored: !season.monitored } : season
-        ),
-      }
-      return api.put(`/proxy/sonarr/api/v3/series/${s.id}`, updated)
-    },
-    onSuccess: (_, { s, seasonNumber }) => {
-      queryClient.invalidateQueries({ queryKey: ['sonarr-series'] })
-      // Optimistically update selected series so the panel reflects the change immediately
-      if (selected?.id === s.id) {
-        setSelected((prev) => prev ? {
-          ...prev,
-          seasons: prev.seasons.map((season) =>
-            season.seasonNumber === seasonNumber ? { ...season, monitored: !season.monitored } : season
-          ),
-        } : null)
-      }
-    },
-  })
-
   if (!enabled) {
     return (
       <div className="p-6">
@@ -628,16 +379,11 @@ export default function TVShows() {
       {selected && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setSelected(null)} />
-          <SeriesDetailPanel
-            series={selected}
-            profiles={profiles}
+          <MediaDetail
+            kind="series"
+            id={selected.id}
             onClose={() => setSelected(null)}
-            onUpdate={(s) => updateSeries.mutate(s)}
-            onDelete={(s, files) => deleteSeries.mutate({ s, deleteFiles: files })}
-            onSearch={(s) => triggerSearch.mutate(s)}
-            onSeasonToggle={(s, seasonNumber) => toggleSeason.mutate({ s, seasonNumber })}
-            isSearching={triggerSearch.isPending}
-            searchQueued={triggerSearch.isSuccess && triggerSearch.variables?.id === selected.id}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['sonarr-series'] })}
           />
         </>
       )}

@@ -26,6 +26,7 @@ const Logs        = lazy(() => import('./pages/Logs'))
 const Search      = lazy(() => import('./pages/Search'))
 const System      = lazy(() => import('./pages/System'))
 const Wanted      = lazy(() => import('./pages/Wanted'))
+const Reclaim     = lazy(() => import('./pages/Reclaim'))
 const History     = lazy(() => import('./pages/History'))
 const Stats       = lazy(() => import('./pages/Stats'))
 const PlexLibrary = lazy(() => import('./pages/PlexLibrary'))
@@ -76,6 +77,7 @@ function AppRoutes() {
         <Route path="search" element={<Suspense fallback={<RouteFallback />}><Search /></Suspense>} />
         <Route path="system" element={<Suspense fallback={<RouteFallback />}><System /></Suspense>} />
         <Route path="wanted" element={<Suspense fallback={<RouteFallback />}><Wanted /></Suspense>} />
+        <Route path="reclaim" element={<Suspense fallback={<RouteFallback />}><Reclaim /></Suspense>} />
         <Route path="history" element={<Suspense fallback={<RouteFallback />}><History /></Suspense>} />
         <Route path="stats" element={<Suspense fallback={<RouteFallback />}><Stats /></Suspense>} />
         <Route path="plex" element={<Suspense fallback={<RouteFallback />}><PlexLibrary /></Suspense>} />

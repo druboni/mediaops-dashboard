@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
+import MediaDetail from '../components/MediaDetail'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,13 +39,6 @@ interface RadarrMovie {
 }
 interface QualityProfile { id: number; name: string }
 interface RootFolder { id: number; path: string; freeSpace: number }
-interface HistoryRecord {
-  id: number
-  eventType: string
-  date: string
-  sourceTitle: string
-  quality?: { quality: { name: string } }
-}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -52,13 +46,6 @@ function formatBytes(b: number) {
   if (b >= 1_073_741_824) return `${(b / 1_073_741_824).toFixed(1)} GB`
   if (b >= 1_048_576) return `${(b / 1_048_576).toFixed(0)} MB`
   return `${Math.round(b / 1024)} KB`
-}
-
-function formatRuntime(mins: number) {
-  if (!mins) return null
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return h ? `${h}h ${m}m` : `${m}m`
 }
 
 function posterUrl(movie: Pick<RadarrMovie, 'images' | 'remotePoster'>) {
@@ -70,175 +57,6 @@ function movieStatus(m: RadarrMovie): { label: string; color: string } {
   if (m.hasFile) return { label: 'Downloaded', color: 'text-green-400' }
   if (!m.isAvailable) return { label: 'Not Available', color: 'text-gray-500' }
   return { label: 'Missing', color: 'text-red-400' }
-}
-
-const EVENT_LABEL: Record<string, string> = {
-  grabbed: 'Grabbed',
-  downloadFolderImported: 'Imported',
-  downloadFailed: 'Failed',
-  movieFileDeleted: 'File Deleted',
-  movieFileRenamed: 'Renamed',
-  movieAdded: 'Added',
-  ignored: 'Ignored',
-}
-
-function timeAgo(d: string) {
-  const diff = Date.now() - new Date(d).getTime()
-  const m = Math.floor(diff / 60000)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
-}
-
-// ── Detail Panel ───────────────────────────────────────────────────────────
-
-function MovieDetailPanel({
-  movie, profiles, onClose, onUpdate, onDelete, onSearch, isSearching, searchQueued,
-}: {
-  movie: RadarrMovie
-  profiles: QualityProfile[]
-  onClose: () => void
-  onUpdate: (m: RadarrMovie) => void
-  onDelete: (m: RadarrMovie, files: boolean) => void
-  onSearch: (m: RadarrMovie) => void
-  isSearching: boolean
-  searchQueued: boolean
-}) {
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const profileName = profiles.find((p) => p.id === movie.qualityProfileId)?.name ?? '—'
-
-  const { data: history } = useQuery<HistoryRecord[]>({
-    queryKey: ['radarr-movie-history', movie.id],
-    queryFn: async () => {
-      const r = await api.get(`/proxy/radarr/api/v3/history/movie`, { params: { movieId: movie.id, pageSize: 8 } })
-      return r.data
-    },
-    staleTime: 30_000,
-  })
-
-  const poster = posterUrl(movie)
-  const { label: statusLabel, color: statusColor } = movieStatus(movie)
-
-  return (
-    <div className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-gray-900 border-l border-gray-800 flex flex-col z-40 overflow-hidden shadow-2xl">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 shrink-0">
-        <span className="text-sm font-semibold text-white truncate pr-2">{movie.title}</span>
-        <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors shrink-0">✕</button>
-      </div>
-
-      <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
-        {/* Poster + meta */}
-        <div className="flex gap-4">
-          {poster ? (
-            <img src={poster} alt="" className="w-20 rounded-md shrink-0 object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-          ) : (
-            <div className="w-20 h-28 bg-gray-800 rounded-md shrink-0 flex items-center justify-center text-gray-600 text-xs">No poster</div>
-          )}
-          <div className="min-w-0">
-            <p className="text-white font-semibold text-sm">{movie.title}</p>
-            <p className="text-gray-500 text-xs mt-0.5">{movie.year}{movie.runtime ? ` · ${formatRuntime(movie.runtime)}` : ''}{movie.certification ? ` · ${movie.certification}` : ''}</p>
-            <p className={`text-xs mt-1 font-medium ${statusColor}`}>{statusLabel}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{profileName}</p>
-            {movie.genres?.length > 0 && (
-              <p className="text-xs text-gray-600 mt-1">{movie.genres.slice(0, 3).join(', ')}</p>
-            )}
-            {movie.ratings?.imdb && (
-              <p className="text-xs text-gray-500 mt-0.5">IMDb {movie.ratings.imdb.value.toFixed(1)}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Overview */}
-        {movie.overview && (
-          <p className="text-xs text-gray-400 leading-relaxed line-clamp-4">{movie.overview}</p>
-        )}
-
-        {/* File info */}
-        {movie.movieFile && (
-          <div className="bg-gray-800/60 rounded-lg p-3 space-y-1">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">File</p>
-            <p className="text-xs text-gray-300">{movie.movieFile.quality.quality.name}</p>
-            {movie.movieFile.mediaInfo && (
-              <p className="text-xs text-gray-500">{movie.movieFile.mediaInfo.videoCodec} · {movie.movieFile.mediaInfo.resolution} · {movie.movieFile.mediaInfo.audioCodec}</p>
-            )}
-            <p className="text-xs text-gray-500">{formatBytes(movie.movieFile.size)}</p>
-            <p className="text-xs text-gray-600 truncate" title={movie.movieFile.relativePath}>{movie.movieFile.relativePath}</p>
-          </div>
-        )}
-
-        {/* History */}
-        {history && history.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">History</p>
-            <div className="space-y-1">
-              {history.slice(0, 6).map((h) => (
-                <div key={h.id} className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
-                      h.eventType === 'downloadFolderImported' ? 'bg-green-900/60 text-green-400' :
-                      h.eventType === 'downloadFailed' ? 'bg-red-900/60 text-red-400' :
-                      h.eventType === 'grabbed' ? 'bg-blue-900/60 text-blue-400' :
-                      'bg-gray-800 text-gray-500'
-                    }`}>
-                      {EVENT_LABEL[h.eventType] ?? h.eventType}
-                    </span>
-                    {h.quality && <span className="text-xs text-gray-500 truncate">{h.quality.quality.name}</span>}
-                  </div>
-                  <span className="text-xs text-gray-600 shrink-0">{timeAgo(h.date)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="px-5 py-4 border-t border-gray-800 shrink-0 space-y-2">
-        {showDeleteConfirm ? (
-          <div className="space-y-2">
-            <p className="text-xs text-gray-400">Delete from Radarr?</p>
-            <div className="flex gap-2">
-              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 text-xs py-1.5 rounded bg-gray-800 text-gray-400 hover:text-white transition-colors">Cancel</button>
-              <button onClick={() => { onDelete(movie, false); setShowDeleteConfirm(false) }} className="flex-1 text-xs py-1.5 rounded bg-red-800 hover:bg-red-700 text-white transition-colors">Remove</button>
-              {movie.hasFile && (
-                <button onClick={() => { onDelete(movie, true); setShowDeleteConfirm(false) }} className="flex-1 text-xs py-1.5 rounded bg-red-950 border border-red-800 text-red-300 hover:bg-red-900 transition-colors">+Files</button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              onClick={() => onSearch(movie)}
-              disabled={isSearching}
-              className={`flex-1 text-xs py-1.5 rounded text-white transition-colors ${
-                searchQueued ? 'bg-green-700' : 'bg-blue-700 hover:bg-blue-600'
-              } disabled:opacity-60`}
-            >
-              {isSearching ? 'Searching…' : searchQueued ? 'Queued!' : 'Search'}
-            </button>
-            <button
-              onClick={() => onUpdate({ ...movie, monitored: !movie.monitored })}
-              className={`flex-1 text-xs py-1.5 rounded border transition-colors ${
-                movie.monitored
-                  ? 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500'
-                  : 'bg-yellow-900/30 border-yellow-700 text-yellow-400 hover:bg-yellow-900/50'
-              }`}
-            >
-              {movie.monitored ? 'Monitored' : 'Unmonitored'}
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="text-xs px-3 py-1.5 rounded bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-300 border border-gray-700 hover:border-red-800 transition-colors"
-            >
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }
 
 // ── Add Movie Modal ────────────────────────────────────────────────────────
@@ -418,35 +236,6 @@ export default function Movies() {
     staleTime: 60_000,
   })
 
-  const { data: profiles = [] } = useQuery<QualityProfile[]>({
-    queryKey: ['radarr-profiles'],
-    queryFn: async () => (await api.get('/proxy/radarr/api/v3/qualityprofile')).data,
-    enabled,
-    staleTime: 300_000,
-  })
-
-  const updateMovie = useMutation({
-    mutationFn: (m: RadarrMovie) => api.put(`/proxy/radarr/api/v3/movie/${m.id}`, m),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['radarr-movies'] })
-      setSelected(null)
-    },
-  })
-
-  const deleteMovie = useMutation({
-    mutationFn: ({ movie, deleteFiles }: { movie: RadarrMovie; deleteFiles: boolean }) =>
-      api.delete(`/proxy/radarr/api/v3/movie/${movie.id}`, { params: { deleteFiles } }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['radarr-movies'] })
-      setSelected(null)
-    },
-  })
-
-  const triggerSearch = useMutation({
-    mutationFn: (movie: RadarrMovie) =>
-      api.post('/proxy/radarr/api/v3/command', { name: 'MoviesSearch', movieIds: [movie.id] }),
-  })
-
   if (!enabled) {
     return (
       <div className="p-6">
@@ -589,15 +378,11 @@ export default function Movies() {
       {selected && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setSelected(null)} />
-          <MovieDetailPanel
-            movie={selected}
-            profiles={profiles}
+          <MediaDetail
+            kind="movie"
+            id={selected.id}
             onClose={() => setSelected(null)}
-            onUpdate={(m) => updateMovie.mutate(m)}
-            onDelete={(m, files) => deleteMovie.mutate({ movie: m, deleteFiles: files })}
-            onSearch={(m) => triggerSearch.mutate(m)}
-            isSearching={triggerSearch.isPending}
-            searchQueued={triggerSearch.isSuccess && triggerSearch.variables?.id === selected.id}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['radarr-movies'] })}
           />
         </>
       )}

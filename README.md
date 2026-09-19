@@ -42,6 +42,20 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
   - Episode summary on click
 - Paginated (50 items per page)
 
+### Media Detail
+
+Clicking any movie or show — from Movies, TV Shows, or Reclaim — opens one panel that merges every service that knows about that title, rather than the per-service slices each page used to show:
+
+- **File & quality** — codec, resolution, audio, size, path (Radarr/Sonarr)
+- **Watched by** — who played it, how many times, how recently, and whether they transcoded (Tautulli)
+- **Subtitles** — languages present and missing (Bazarr)
+- **Requested by** — who asked for it and when (Overseerr)
+- **History** — grab and import events (Radarr/Sonarr)
+- **Seasons** — per-season monitor toggles with episode counts and size (Sonarr)
+- Actions: search, monitor toggle, delete (with or without files), and a deep link into Plex
+
+Every section is independently optional — a service that's disabled or unreachable just leaves its section out, and the panel still renders everything else.
+
 ### Sonarr / Radarr / Lidarr Management
 - **Indexers** — add, edit, enable/disable, test, and delete, with a live OK/Failing health badge per indexer and the real error surfaced when a test fails
 - **Download clients** — add, edit, enable/disable, test, and delete
@@ -50,6 +64,27 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
 - **Naming** and **Media Management** settings
 - **Host / General** settings (port, URL base, auth, SSL, logging, updates, proxy, backups)
 - **Multi-instance support** — manage a secondary named instance per app (e.g. a separate 4K Sonarr/Radarr) alongside the primary one, configured in Settings → Additional Instances
+
+### Reclaim (disk cleanup)
+
+Answers the question the rest of the dashboard can't: **what can I safely delete?**
+
+Joins Radarr/Sonarr file sizes against Tautulli play history, then groups everything on disk into five lenses, each showing how much space it represents:
+
+| Lens | What it finds | Needs Tautulli |
+|---|---|---|
+| **Never Played** | Has files, zero plays, and old enough to have had a fair chance (30–365 day threshold) | Yes |
+| **Not Played Recently** | Watched at least once, but not for 3–24 months | Yes |
+| **Largest Files** | The biggest things on disk, watched or not | No |
+| **Duplicates** | Same title held by more than one instance — typically your 4K and 1080p copies | No |
+| **Orphans** | Files tracked by Radarr/Sonarr that no Plex library knows about, usually a failed import | Yes |
+
+- Multi-select with a running **"X selected · Y GB reclaimable"** total
+- Two action tiers: **Unmonitor** (safe, keeps everything) and **Delete & free space** (removes from the *arr *and* deletes files, behind a typed confirmation)
+- Bulk actions run sequentially so a large selection doesn't overwhelm an *arr instance, with per-item progress and a failure summary
+- Click any row to open the full media detail panel before deciding
+- Secondary instances are handled correctly — an action on a 4K item goes to your 4K Radarr
+- Without Tautulli, Largest Files and Duplicates still work; the watch-based lenses are disabled with an explanation rather than silently empty
 
 ### Wanted / Missing
 - Missing movies from Radarr and missing episodes from Sonarr in one place
@@ -107,7 +142,7 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
 | Category | Service | Notes |
 |---|---|---|
 | Media Server | **Plex** | Streams, library browser, recently played |
-| Media Server | **Tautulli** | Play stats, history |
+| Media Server | **Tautulli** | Play stats, history, watch data for Reclaim and media detail |
 | Media Management | **Sonarr** | TV shows, indexers, download clients, quality profiles, wanted, history, calendar |
 | Media Management | **Radarr** | Movies, indexers, download clients, quality profiles, wanted, history, calendar |
 | Media Management | **Lidarr** | Music library, indexers, download clients, quality profiles, history |
