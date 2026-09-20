@@ -16,6 +16,7 @@ const DEFAULT_CONFIG = {
   notifications: {
     discordWebhookUrl: '',
     mediaAddedEnabled: false,
+    issueReportedEnabled: false,
     webhookSecret: '',
     ntfyEnabled: false,
     ntfyUrl: '',

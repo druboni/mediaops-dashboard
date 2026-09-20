@@ -1,6 +1,7 @@
 import { statfs } from 'fs/promises'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
+import { enrichWithTitles } from './overseerr.js'
 import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 
@@ -155,16 +156,46 @@ async function getSimpleHealth(url, path, headers = {}, extractVersion = null) {
   return { health: { ok: true, ...(version ? { version } : {}) } }
 }
 
+// 0=other, 1=video, 2=audio, 3=subtitles, 4=not available — matches the labels
+// the Requests page already uses.
+const ISSUE_TYPE = { 0: 'Other', 1: 'Video', 2: 'Audio', 3: 'Subtitles', 4: 'Not Available' }
+
 async function getOverseerrData(url, key) {
   const headers = { 'X-Api-Key': key }
-  const [status, counts, pending] = await Promise.all([
+  const [status, counts, pending, issues] = await Promise.all([
     safeFetch(`${url}/api/v1/status`, { headers }),
     safeFetch(`${url}/api/v1/request/count`, { headers }),
     safeFetch(`${url}/api/v1/request?filter=pending&take=5&skip=0&sort=added`, { headers }),
+    // Open issues are the whole point of surfacing this on the dashboard — an
+    // unread problem report shouldn't sit in a tab waiting to be noticed.
+    safeFetch(`${url}/api/v1/issue?filter=open&take=5&skip=0&sort=added`, { headers }),
   ])
+
+  // The issue payload carries a media object but no title, so resolve those the
+  // same way the Requests page does.
+  let openIssues = []
+  if (issues.ok) {
+    const raw = issues.data?.results ?? []
+    const enriched = await enrichWithTitles({ url, apiKey: key }, raw).catch(() => raw)
+    openIssues = enriched.map((i) => ({
+      id: i.id,
+      title: i.media?.title || i.media?.originalTitle || 'Unknown',
+      issueType: ISSUE_TYPE[i.issueType] ?? 'Other',
+      mediaType: i.media?.mediaType ?? null,
+      tmdbId: i.media?.tmdbId ?? null,
+      reportedBy: i.createdBy?.displayName || i.createdBy?.plexUsername || 'Unknown',
+      createdAt: i.createdAt ?? null,
+      problemSeason: i.problemSeason || 0,
+      problemEpisode: i.problemEpisode || 0,
+      commentCount: (i.comments ?? []).length,
+    }))
+  }
+
   return {
     health: status.ok ? { ok: true, version: status.data.version } : { ok: false, error: status.error },
     pendingCount: counts.ok ? (counts.data.pending ?? null) : null,
+    openIssueCount: issues.ok ? (issues.data?.pageInfo?.results ?? openIssues.length) : null,
+    openIssues,
     pendingRequests: pending.ok ? (pending.data.results || []).map((r) => ({
       id: r.id,
       title: r.media?.originalTitle || r.media?.title || 'Unknown',
@@ -342,7 +373,7 @@ export default async function dashboardRoutes(fastify) {
         qbit     && `qbit:${qbit.activeCount ?? 0}active`,
         nzbget   && `nzbget:${nzbget.activeCount ?? 0}active`,
         plex     && `plex:${plex.activeStreams ?? 0}streams`,
-        overseerr && `overseerr:${overseerr.pendingCount ?? 0}pending`,
+        overseerr && `overseerr:${overseerr.pendingCount ?? 0}pending/${overseerr.openIssueCount ?? 0}issues`,
       ].filter(Boolean).join(' | '),
     })
 
@@ -367,6 +398,7 @@ export default async function dashboardRoutes(fastify) {
         albums:          lidarr?.albumCount ?? null,
         plexStreams:     plex?.activeStreams  ?? null,
         pendingRequests: overseerr?.pendingCount ?? null,
+        openIssues:      overseerr?.openIssueCount ?? null,
       },
       plexDisk,
       downloads: {
@@ -380,6 +412,7 @@ export default async function dashboardRoutes(fastify) {
       // (Tautulli agent can stop logging while Plex keeps its own history up to date).
       recentlyPlayed: mergeRecentlyPlayed(plex?.recentlyPlayed, tautulli?.recentlyPlayed),
       pendingRequests: overseerr?.pendingRequests || [],
+      openIssues: overseerr?.openIssues || [],
     }
   })
 }

@@ -12,7 +12,7 @@ async function callOverseerr(svc, path, params = {}) {
   return res.json()
 }
 
-async function enrichWithTitles(svc, items) {
+export async function enrichWithTitles(svc, items) {
   const seen = new Set()
   const lookups = []
   for (const item of items) {

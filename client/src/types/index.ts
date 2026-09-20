@@ -27,6 +27,7 @@ export interface QuickLink {
 export interface NotificationsConfig {
   discordWebhookUrl: string
   mediaAddedEnabled: boolean
+  issueReportedEnabled: boolean
   webhookSecret: string
   ntfyEnabled: boolean
   ntfyUrl: string

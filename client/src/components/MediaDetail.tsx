@@ -127,6 +127,18 @@ interface MediaDetailData {
       requestedAt: string | null
       is4k: boolean
     }[]
+    issues?: {
+      id: number
+      type: string
+      status: string
+      open: boolean
+      reportedBy: string
+      createdAt: string | null
+      problemSeason: number
+      problemEpisode: number
+      commentCount: number
+      lastComment: string | null
+    }[]
   }
   plex: {
     available: boolean
@@ -518,6 +530,50 @@ export default function MediaDetail({
                 )}
               </div>
             )}
+          </Section>
+        )}
+
+        {/* Reported issues — someone says this file is broken */}
+        {request.available && (request.issues ?? []).length > 0 && (
+          <Section label="Reported Issues">
+            <div className="space-y-2">
+              {(request.issues ?? [])
+                .slice()
+                .sort((a, b) => Number(b.open) - Number(a.open))
+                .map((i) => (
+                  <div
+                    key={i.id}
+                    className={`rounded-lg px-3 py-2 border ${
+                      i.open ? 'bg-red-900/20 border-red-900/60' : 'bg-gray-800/60 border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                            i.open ? 'bg-red-900/60 text-red-400' : 'bg-gray-800 text-gray-500'
+                          }`}
+                        >
+                          {i.type}
+                        </span>
+                        <span className="text-xs text-gray-300 truncate">{i.reportedBy}</span>
+                        {i.problemSeason > 0 && (
+                          <span className="text-[10px] text-gray-600 shrink-0">
+                            S{String(i.problemSeason).padStart(2, '0')}
+                            {i.problemEpisode > 0 ? `E${String(i.problemEpisode).padStart(2, '0')}` : ''}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-xs shrink-0 ${i.open ? 'text-red-400' : 'text-gray-600'}`}>
+                        {i.open ? 'Open' : 'Resolved'} · {timeAgo(i.createdAt)}
+                      </span>
+                    </div>
+                    {i.lastComment && (
+                      <p className="text-xs text-gray-500 mt-1 line-clamp-2">{i.lastComment}</p>
+                    )}
+                  </div>
+                ))}
+            </div>
           </Section>
         )}
 

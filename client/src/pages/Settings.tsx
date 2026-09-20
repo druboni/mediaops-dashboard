@@ -60,7 +60,7 @@ export default function Settings() {
   const [monitoredServers, setMonitoredServers] = useState<MonitoredServer[]>([])
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [notifications, setNotifications] = useState<NotificationsConfig>({
-    discordWebhookUrl: '', mediaAddedEnabled: false, webhookSecret: '',
+    discordWebhookUrl: '', mediaAddedEnabled: false, issueReportedEnabled: false, webhookSecret: '',
     ntfyEnabled: false, ntfyUrl: '',
     pushoverEnabled: false, pushoverUserKey: '', pushoverApiToken: '',
     telegramEnabled: false, telegramBotToken: '', telegramChatId: '',
@@ -410,7 +410,39 @@ export default function Settings() {
           )}
         </div>
 
-        {notifications.mediaAddedEnabled && (
+        {/* Overseerr issue reports */}
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 mt-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white font-medium mb-0.5">Notify on reported issues</p>
+              <p className="text-xs text-gray-500">
+                Fires when someone reports a problem in Overseerr — new issues, comments, and resolutions
+              </p>
+            </div>
+            <Toggle
+              enabled={notifications.issueReportedEnabled}
+              onChange={(v) => setNotifications((p) => ({ ...p, issueReportedEnabled: v }))}
+            />
+          </div>
+
+          {notifications.issueReportedEnabled && notifications.webhookSecret && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">
+                Add this as a Webhook notification agent in Overseerr
+                (Settings → Notifications → Webhook), with the Issue triggers enabled:
+              </p>
+              <code className="block text-xs bg-black/40 border border-gray-800 rounded px-2 py-1.5 text-gray-300 break-all">
+                {window.location.origin}/api/webhooks/issue/{notifications.webhookSecret}
+              </code>
+              <p className="text-xs text-gray-600 mt-1">
+                Leave Overseerr's default JSON payload as-is. Open issues also appear on the Dashboard and in
+                the media detail panel without this — the webhook is only for push notifications.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {(notifications.mediaAddedEnabled || notifications.issueReportedEnabled) && (
         <>
         {/* ntfy */}
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 mt-3">

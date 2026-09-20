@@ -17,6 +17,7 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
 - **Recently added** — last imports from Radarr, Sonarr, and Lidarr with show/episode names
 - **Recently played** — Tautulli history feed (what your users have been watching)
 - **Pending requests** — inline approve/decline for Overseerr requests
+- **Reported issues** — open Overseerr issue reports surface here the moment they're filed, with reporter, issue type and affected episode; a count badge also appears on Requests in the sidebar
 - **Health alerts** — Sonarr/Radarr/Lidarr application health warnings, Prowlarr indexer failures, and low-disk-space alerts, dismissible
 
 ### Downloads
@@ -31,6 +32,7 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
 - Browse all requests with status badges (Pending / Approved / Available / etc.)
 - Approve or decline individual requests
 - Batch approve / batch decline all pending requests at once
+- **Issues** tab — problem reports from your users, with detail, resolve and delete. Open issues are also surfaced on the Dashboard and in the media detail panel, so a report doesn't sit unnoticed
 
 ### Plex Library Browser
 - Pick any Plex library (Movies, TV Shows, Music)
@@ -49,6 +51,7 @@ Clicking any movie or show — from Movies, TV Shows, or Reclaim — opens one p
 - **File & quality** — codec, resolution, audio, size, path (Radarr/Sonarr)
 - **Watched by** — who played it, how many times, how recently, and whether they transcoded (Tautulli)
 - **Subtitles** — languages present and missing (Bazarr)
+- **Reported issues** — open and resolved problem reports for this title, with the reporter and their latest comment (Overseerr)
 - **Requested by** — who asked for it and when (Overseerr)
 - **History** — grab and import events (Radarr/Sonarr)
 - **Seasons** — per-season monitor toggles with episode counts and size (Sonarr)
@@ -121,6 +124,7 @@ Joins Radarr/Sonarr file sizes against Tautulli play history, then groups everyt
 
 ### Notifications
 - Discord, [ntfy](https://ntfy.sh), Pushover, and Telegram — fires from Sonarr/Radarr's own webhook whenever new media is imported, independent of Plex
+- **Issue reports** — optionally fires the same channels when someone reports a problem in Overseerr (new issue, comment, resolved, reopened), via an Overseerr webhook pointed at MediaOps. Open issues appear in the UI regardless; this is only for push
 - Each channel has its own enable toggle, credential fields, and test button in Settings
 
 ### Settings
@@ -147,7 +151,7 @@ Joins Radarr/Sonarr file sizes against Tautulli play history, then groups everyt
 | Media Management | **Radarr** | Movies, indexers, download clients, quality profiles, wanted, history, calendar |
 | Media Management | **Lidarr** | Music library, indexers, download clients, quality profiles, history |
 | Media Management | **Bazarr** | Subtitle wanted/history/providers, read-only language list |
-| Requests | **Overseerr** | Request approval, search |
+| Requests | **Overseerr** | Request approval, search, issue reports |
 | Indexers | **Prowlarr** | Indexer management, health, search |
 | Indexers | **Jackett** | Indexer health |
 | Download Clients | **qBittorrent** | Queue, completed, speed control |

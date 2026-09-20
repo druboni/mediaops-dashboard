@@ -215,6 +215,8 @@ async function bazarrSeries(svc, sonarrId) {
 // paging the whole request list looking for a tmdb id.
 const REQUEST_STATUS = { 1: 'Pending', 2: 'Approved', 3: 'Declined', 4: 'Failed' }
 const MEDIA_STATUS = { 1: 'Unknown', 2: 'Pending', 3: 'Processing', 4: 'Partially Available', 5: 'Available' }
+const ISSUE_TYPE = { 0: 'Other', 1: 'Video', 2: 'Audio', 3: 'Subtitles', 4: 'Not Available' }
+const ISSUE_STATUS = { 1: 'Open', 2: 'Resolved' }
 
 async function overseerrInfo(svc, kind, tmdbId) {
   if (!tmdbId) return { available: false }
@@ -226,6 +228,9 @@ async function overseerrInfo(svc, kind, tmdbId) {
 
   const mediaInfo = res.data?.mediaInfo
   const requests = mediaInfo?.requests ?? []
+  // Overseerr hangs reported issues off the same per-title payload, so showing
+  // "someone says the audio is broken" next to the file costs no extra call.
+  const issues = mediaInfo?.issues ?? []
 
   return {
     available: true,
@@ -236,6 +241,20 @@ async function overseerrInfo(svc, kind, tmdbId) {
       requestedBy: r.requestedBy?.displayName || r.requestedBy?.plexUsername || r.requestedBy?.email || 'Unknown',
       requestedAt: r.createdAt ?? null,
       is4k: !!r.is4k,
+    })),
+    issues: issues.map((i) => ({
+      id: i.id,
+      type: ISSUE_TYPE[i.issueType] ?? 'Other',
+      status: ISSUE_STATUS[i.status] ?? 'Unknown',
+      open: i.status === 1,
+      reportedBy: i.createdBy?.displayName || i.createdBy?.plexUsername || 'Unknown',
+      createdAt: i.createdAt ?? null,
+      problemSeason: i.problemSeason || 0,
+      problemEpisode: i.problemEpisode || 0,
+      // The list payload omits comment bodies; the count is enough to show
+      // there's a conversation worth opening in Overseerr.
+      commentCount: (i.comments ?? []).length,
+      lastComment: (i.comments ?? []).slice(-1)[0]?.message ?? null,
     })),
   }
 }

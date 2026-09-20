@@ -1,4 +1,5 @@
 import { getConfig } from './config.js'
+import { addLog } from '../logBuffer.js'
 
 const COLOR = 0xe5a00d
 
@@ -141,7 +142,96 @@ function queueSonarrEpisodes(fastify, notif, series, newEpisodes) {
   }, delay)
 }
 
+
+// ── Overseerr issue reports ────────────────────────────────────────────────
+
+// Overseerr's own webhook agent posts these. Its default JSON template carries
+// notification_type plus an `issue` block; the subject/message fields are
+// already human-readable, so they're used directly rather than rebuilt.
+const ISSUE_TYPE_LABEL = {
+  VIDEO: 'Video', AUDIO: 'Audio', SUBTITLES: 'Subtitles', OTHER: 'Other', NONE: 'Other',
+}
+
+const ISSUE_EVENT_TITLE = {
+  ISSUE_CREATED: 'New issue reported',
+  ISSUE_COMMENT: 'New comment on an issue',
+  ISSUE_RESOLVED: 'Issue resolved',
+  ISSUE_REOPENED: 'Issue reopened',
+}
+
+const ISSUE_COLOR = {
+  ISSUE_CREATED: 0xd9534f,
+  ISSUE_COMMENT: 0x5bc0de,
+  ISSUE_RESOLVED: 0x5cb85c,
+  ISSUE_REOPENED: 0xf0ad4e,
+}
+
+function issueLines(body) {
+  const issue = body.issue || {}
+  const type = ISSUE_TYPE_LABEL[issue.issue_type] ?? issue.issue_type ?? 'Other'
+  const who =
+    issue.reportedBy_username || issue.reported_by_username || issue.reportedBy_email || 'Unknown'
+  const lines = [`**${body.subject || 'Unknown title'}**`, `${type} issue reported by ${who}`]
+  // Overseerr sends the report text as `message` on creation and the comment
+  // body on ISSUE_COMMENT; either way it's the part worth reading.
+  if (body.message) lines.push(`> ${String(body.message).slice(0, 500)}`)
+  if (body.comment?.comment_message) lines.push(`> ${String(body.comment.comment_message).slice(0, 500)}`)
+  return lines
+}
+
+function discordPayloadForIssue(body) {
+  const event = body.notification_type
+  return {
+    embeds: [{
+      title: ISSUE_EVENT_TITLE[event] ?? 'Issue update',
+      description: issueLines(body).join('\n'),
+      color: ISSUE_COLOR[event] ?? COLOR,
+      timestamp: new Date().toISOString(),
+    }],
+  }
+}
+
+// Strip the Discord-only markdown for the plain-text channels.
+const plainTextForIssue = (body) =>
+  `${ISSUE_EVENT_TITLE[body.notification_type] ?? 'Issue update'}\n` +
+  issueLines(body).join('\n').replace(/\*\*/g, '').replace(/^> /gm, '')
+
 export default async function webhookRoutes(fastify) {
+
+  // Overseerr's webhook agent posts issue events here. Same secret-in-path
+  // scheme as the media hook below — Overseerr can't authenticate to us either.
+  // Inert until the webhook is actually configured in Overseerr's settings.
+  fastify.post('/issue/:secret', async (request, reply) => {
+    const config = await getConfig()
+    const notif = config.notifications
+
+    if (request.params.secret !== notif.webhookSecret) return reply.status(404).send()
+
+    const anyChannelEnabled =
+      notif.discordWebhookUrl || notif.ntfyEnabled || notif.pushoverEnabled || notif.telegramEnabled
+    if (!notif.issueReportedEnabled || !anyChannelEnabled) return reply.status(200).send()
+
+    const body = request.body || {}
+    const event = body.notification_type
+
+    // TEST_NOTIFICATION arrives when you press "Test" in Overseerr; letting it
+    // through is what makes that button meaningful.
+    if (event === 'TEST_NOTIFICATION') {
+      notifyAll(fastify, notif,
+        { embeds: [{ title: 'MediaOps issue webhook', description: 'Test received.', color: COLOR, timestamp: new Date().toISOString() }] },
+        'MediaOps issue webhook\nTest received.')
+      return reply.status(200).send()
+    }
+
+    if (!ISSUE_EVENT_TITLE[event]) return reply.status(200).send()
+
+    addLog('info', `[webhook:overseerr] ${event} — ${body.subject || 'unknown title'}`, {
+      event, issueId: body.issue?.issue_id ?? null,
+    })
+    notifyAll(fastify, notif, discordPayloadForIssue(body), plainTextForIssue(body))
+    return reply.status(200).send()
+  })
+
   // Sonarr/Radarr POST a plain JSON body here on their "On Import" connect trigger.
   // No JWT — neither app can authenticate with ours; the random secret in the path
   // is what keeps this endpoint from being guessable.

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
@@ -315,7 +316,13 @@ const TAKE = 25
 export default function Requests() {
   const { enabledServices } = useConfig()
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<MainTab>('pending')
+  // The Dashboard's issue card links here with ?tab=issues; without this it
+  // would always land on Pending and the reported issue would still be hidden.
+  const [searchParams] = useSearchParams()
+  const initialTab = searchParams.get('tab')
+  const [tab, setTab] = useState<MainTab>(
+    initialTab === 'issues' || initialTab === 'all' ? initialTab : 'pending'
+  )
   const [allFilter, setAllFilter] = useState<AllFilter>('all')
   const [issueFilter, setIssueFilter] = useState<IssueFilter>('open')
   const [allPage, setAllPage] = useState(0)

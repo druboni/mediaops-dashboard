@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
@@ -17,6 +17,7 @@ interface DashboardData {
     movies: number | null; shows: number | null; episodes: number | null
     artists: number | null; albums: number | null
     plexStreams: number | null; pendingRequests: number | null
+    openIssues: number | null
   }
   plexDisk: { total: number; free: number; used: number } | null
   downloads: {
@@ -33,6 +34,11 @@ interface DashboardData {
   recentlyDownloaded: { name: string; date: string; size: number; client: string }[]
   recentlyPlayed:     { title: string; subtitle?: string; type: string; user: string; date: string }[]
   pendingRequests:    { id: number; title: string; type: string; requestedBy: string }[]
+  openIssues: {
+    id: number; title: string; issueType: string; mediaType: string | null; tmdbId: number | null
+    reportedBy: string; createdAt: string | null
+    problemSeason: number; problemEpisode: number; commentCount: number
+  }[]
 }
 
 interface QueueItem {
@@ -297,6 +303,7 @@ export default function Dashboard() {
           <StatCard label="Episodes" value={data.stats.episodes} />
           <StatCard label="Streams"  value={data.stats.plexStreams}      highlight={!!data.stats.plexStreams} />
           <StatCard label="Requests" value={data.stats.pendingRequests}  highlight={!!data.stats.pendingRequests} />
+          <StatCard label="Issues"   value={data.stats.openIssues}       highlight={!!data.stats.openIssues} />
           {data.plexDisk && (
             <>
               <StatCard label="Plex Drive Total"     value={formatDiskBytes(data.plexDisk.total)} />
@@ -358,6 +365,41 @@ export default function Dashboard() {
 
       {/* Active Downloads */}
       <ActiveDownloads data={downloadsData} />
+
+      {/* Reported Issues — someone told us something is broken */}
+      {data.openIssues.length > 0 && (
+        <section className="mb-8">
+          <h2 className="section-label">Reported Issues</h2>
+          <div className="bg-gray-900 border border-red-900/60 rounded-lg divide-y divide-gray-800">
+            {data.openIssues.map(issue => (
+              <div key={issue.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-red-900/60 text-red-400 shrink-0">
+                      {issue.issueType}
+                    </span>
+                    <p className="text-sm text-white truncate">{issue.title}</p>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {issue.reportedBy}
+                    {issue.problemSeason
+                      ? ` · S${String(issue.problemSeason).padStart(2, '0')}${issue.problemEpisode ? `E${String(issue.problemEpisode).padStart(2, '0')}` : ''}`
+                      : ''}
+                    {issue.commentCount ? ` · ${issue.commentCount} comment${issue.commentCount === 1 ? '' : 's'}` : ''}
+                    {issue.createdAt ? ` · ${timeAgo(issue.createdAt)}` : ''}
+                  </p>
+                </div>
+                <Link
+                  to="/requests?tab=issues"
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1 rounded transition-colors shrink-0"
+                >
+                  View
+                </Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Pending Requests */}
       {data.pendingRequests.length > 0 && (

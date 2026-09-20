@@ -1,4 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import api from '../services/api'
 import { useConfig } from '../store/config'
 import { useAuth } from '../store/auth'
 import type { ServiceName, QuickLink } from '../types'
@@ -10,6 +12,8 @@ interface NavItem {
   path: string
   service?: ServiceName
   anyOf?: ServiceName[]
+  /** Nav entries that can carry a count badge, keyed by what the badge counts. */
+  badge?: 'openIssues'
 }
 
 interface NavSection {
@@ -32,7 +36,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Requests',
     items: [
-      { label: 'Requests', path: '/requests', service: 'overseerr' },
+      { label: 'Requests', path: '/requests', service: 'overseerr', badge: 'openIssues' },
     ],
   },
   {
@@ -79,6 +83,19 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const isActive = (path: string) => location.pathname === path
 
+  // Reuses the dashboard payload, which already carries the open-issue count —
+  // the sidebar is mounted everywhere, so this must not add a request of its own.
+  const { data: dashboard } = useQuery<{ stats?: { openIssues: number | null } }>({
+    queryKey: ['dashboard'],
+    queryFn: async () => (await api.get('/dashboard')).data,
+    enabled: enabledServices.includes('overseerr'),
+    staleTime: 30_000,
+  })
+  const openIssues = dashboard?.stats?.openIssues ?? 0
+
+  const badgeFor = (item: NavItem) =>
+    item.badge === 'openIssues' && openIssues > 0 ? openIssues : null
+
   const links: QuickLink[] = config?.links ?? []
 
   return (
@@ -115,6 +132,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                   path={item.path}
                   label={item.label}
                   active={isActive(item.path)}
+                  badge={badgeFor(item)}
                   onNavigate={onClose}
                 />
               ))}
@@ -161,22 +179,31 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 }
 
 function NavLink({
-  path, label, active, onNavigate,
+  path, label, active, badge, onNavigate,
 }: {
   path: string
   label: string
   active: boolean
+  badge?: number | null
   onNavigate: () => void
 }) {
   return (
     <Link
       to={path}
       onClick={onNavigate}
-      className={`flex items-center px-4 py-2 text-sm transition-colors ${
+      className={`flex items-center justify-between gap-2 px-4 py-2 text-sm transition-colors ${
         active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
       }`}
     >
-      {label}
+      <span className="truncate">{label}</span>
+      {badge != null && (
+        <span
+          className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-900/70 text-red-300 shrink-0 tabular-nums"
+          title={`${badge} open issue${badge === 1 ? '' : 's'}`}
+        >
+          {badge}
+        </span>
+      )}
     </Link>
   )
 }
