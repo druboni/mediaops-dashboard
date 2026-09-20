@@ -47,28 +47,41 @@ const tautulliBase = (svc) => `${trim(svc.url)}/api/v2?apikey=${encodeURICompone
 // Tautulli has no "look up by tmdb id" call, so we search history by title and
 // then filter the rows ourselves. For movies we also require the year to match
 // when both sides report one, which is enough to separate remakes.
-async function tautulliWatch(svc, { title, year, kind }) {
+async function tautulliWatch(svc, { title, year, kind, plexRatingKey = null }) {
   const base = tautulliBase(svc)
   const mediaType = kind === 'movie' ? 'movie' : 'episode'
 
+  // When Plex has resolved the rating key from the item's tmdb/tvdb/imdb id we
+  // can ask Tautulli for exactly that item. Falling back to a title search is
+  // what used to mismatch alternate editions and year-suffixed show titles.
+  const keyParam = kind === 'movie' ? 'rating_key' : 'grandparent_rating_key'
+  const query = plexRatingKey
+    ? `${keyParam}=${encodeURIComponent(plexRatingKey)}`
+    : `search=${encodeURIComponent(title)}`
+
   const res = await safeFetch(
-    `${base}&cmd=get_history&media_type=${mediaType}&search=${encodeURIComponent(title)}` +
+    `${base}&cmd=get_history&media_type=${mediaType}&${query}` +
       `&length=200&order_column=date&order_dir=desc`
   )
   if (!res.ok) return { available: false }
 
   const rows = res.data?.response?.data?.data ?? []
-  const want = normalize(title)
+  const want = normalize(stripYearSuffix(title))
 
-  const matched = rows.filter((r) => {
-    const rowTitle = kind === 'movie' ? r.title || r.full_title : r.grandparent_title
-    if (normalize(rowTitle) !== want) return false
-    if (kind === 'movie' && year && r.year && Number(r.year) !== Number(year)) return false
-    return true
-  })
+  // An exact rating-key query needs no further filtering; a title search does.
+  const matched = plexRatingKey
+    ? rows
+    : rows.filter((r) => {
+        const rowTitle = kind === 'movie' ? r.title || r.full_title : r.grandparent_title
+        if (normalize(stripYearSuffix(rowTitle)) !== want) return false
+        if (kind === 'movie' && year && r.year && Number(r.year) !== Number(year)) return false
+        return true
+      })
 
   // A show's rating key lives on the grandparent (the series), not the episode row.
-  const ratingKey = kind === 'movie' ? matched[0]?.rating_key ?? null : matched[0]?.grandparent_rating_key ?? null
+  const ratingKey =
+    plexRatingKey ??
+    (kind === 'movie' ? matched[0]?.rating_key ?? null : matched[0]?.grandparent_rating_key ?? null)
 
   // History is capped, so for anything long-running the per-user totals derived
   // from it would undercount. When we have a rating key, Tautulli can give us the
@@ -255,11 +268,17 @@ const plexWebUrl = (machineId, ratingKey) =>
 
 // Runs the four optional lookups that are identical for movies and series, so
 // both handlers below stay focused on their own *arr-specific shape.
-async function gatherSecondary(config, { kind, title, year, tmdbId, arrId }) {
+async function gatherSecondary(config, { kind, title, year, tmdbId, tvdbId, imdbId, arrId }) {
   const { tautulli, bazarr, overseerr, plex } = config.services
 
+  // Cached — the detail panel is opened far more often than the library changes.
+  const guidIndex = plex?.enabled ? await plexGuidIndex(plex).catch(() => null) : null
+  const plexRatingKey = resolveRatingKey(guidIndex, kind, { title, year, tmdbId, tvdbId, imdbId })
+
   const [watchR, subsR, requestR, machineR] = await Promise.allSettled([
-    tautulli?.enabled ? tautulliWatch(tautulli, { title, year, kind }) : Promise.resolve({ available: false }),
+    tautulli?.enabled
+      ? tautulliWatch(tautulli, { title, year, kind, plexRatingKey })
+      : Promise.resolve({ available: false }),
     bazarr?.enabled
       ? kind === 'movie'
         ? bazarrMovie(bazarr, arrId)
@@ -272,14 +291,19 @@ async function gatherSecondary(config, { kind, title, year, tmdbId, arrId }) {
   const watch = settled(watchR) ?? { available: false }
   const machineId = settled(machineR)
 
+  // Plex's own answer beats one inferred from play history — it's present even
+  // for something nobody has ever played.
+  const ratingKey = plexRatingKey ?? watch.ratingKey ?? null
+
   return {
     watch,
     subtitles: settled(subsR) ?? { available: false },
     request: settled(requestR) ?? { available: false },
     plex: {
-      available: !!(plex?.enabled && watch.ratingKey),
-      ratingKey: watch.ratingKey ?? null,
-      webUrl: plexWebUrl(machineId, watch.ratingKey),
+      available: !!(plex?.enabled && ratingKey),
+      ratingKey,
+      inLibrary: guidIndex ? !!plexRatingKey : null,
+      webUrl: plexWebUrl(machineId, ratingKey),
     },
   }
 }
@@ -335,6 +359,103 @@ const watchKeys = (title, year) => {
   return keys
 }
 
+
+// Plex is the only service that can state authoritatively what's in the library
+// and what external ids it maps to. /library/sections/{id}/all?includeGuids=1
+// returns the whole section with an imdb/tmdb/tvdb triple per item in one call,
+// which is the exact join Radarr and Sonarr need — no title guessing.
+//
+// Cached because the detail panel hits it per open; Reclaim forces a rebuild
+// since a scan is a deliberate, user-initiated action.
+let guidIndexCache = { value: null, at: 0 }
+const GUID_INDEX_TTL = 600_000
+
+async function plexGuidIndex(svc, { force = false } = {}) {
+  if (!force && guidIndexCache.value && Date.now() - guidIndexCache.at < GUID_INDEX_TTL) {
+    return guidIndexCache.value
+  }
+
+  const base = trim(svc.url)
+  const headers = { 'X-Plex-Token': svc.apiKey, Accept: 'application/json' }
+
+  const secRes = await safeFetch(`${base}/library/sections`, { headers }, 15000)
+  if (!secRes.ok) return null
+
+  const sections = (secRes.data?.MediaContainer?.Directory ?? []).filter(
+    (d) => d.type === 'movie' || d.type === 'show'
+  )
+  if (!sections.length) return null
+
+  const results = await Promise.allSettled(
+    sections.map((d) =>
+      safeFetch(
+        `${base}/library/sections/${d.key}/all?includeGuids=1` +
+          `&X-Plex-Container-Start=0&X-Plex-Container-Size=10000`,
+        { headers },
+        30000
+      )
+    )
+  )
+
+  const movie = new Map()
+  const show = new Map()
+  const titles = { movie: new Map(), show: new Map() }
+  let anyOk = false
+
+  sections.forEach((section, i) => {
+    const r = settled(results[i])
+    if (!r?.ok) return
+    anyOk = true
+    const guidTarget = section.type === 'movie' ? movie : show
+    const titleTarget = titles[section.type]
+
+    for (const item of r.data?.MediaContainer?.Metadata ?? []) {
+      const ratingKey = String(item.ratingKey)
+      for (const g of item.Guid ?? []) {
+        if (g.id && !guidTarget.has(g.id)) guidTarget.set(g.id, ratingKey)
+      }
+      // Title keys as a backstop for anything Plex has without a usable guid.
+      for (const key of watchKeys(item.title, item.year)) {
+        if (!titleTarget.has(key)) titleTarget.set(key, ratingKey)
+      }
+    }
+  })
+
+  if (!anyOk) return null
+  const index = { movie, show, titles }
+  guidIndexCache = { value: index, at: Date.now() }
+  return index
+}
+
+// The external ids each app can offer, most reliable first. Sonarr is a tvdb-first
+// application, Radarr a tmdb-first one, so the orders differ deliberately.
+const guidCandidates = (kind, item) =>
+  (kind === 'movie'
+    ? [item.tmdbId && `tmdb://${item.tmdbId}`, item.imdbId && `imdb://${item.imdbId}`]
+    : [
+        item.tvdbId && `tvdb://${item.tvdbId}`,
+        item.tmdbId && `tmdb://${item.tmdbId}`,
+        item.imdbId && `imdb://${item.imdbId}`,
+      ]
+  ).filter(Boolean)
+
+// Resolve an *arr record to its Plex rating key: exact id match first, then the
+// title backstop for the handful of items Plex holds without a matching guid.
+function resolveRatingKey(guidIndex, kind, item) {
+  if (!guidIndex) return null
+  const guidMap = kind === 'movie' ? guidIndex.movie : guidIndex.show
+  for (const g of guidCandidates(kind, item)) {
+    const hit = guidMap.get(g)
+    if (hit) return hit
+  }
+  const titleMap = kind === 'movie' ? guidIndex.titles.movie : guidIndex.titles.show
+  for (const key of watchKeys(item.title, item.year)) {
+    const hit = titleMap.get(key)
+    if (hit) return hit
+  }
+  return null
+}
+
 async function tautulliLibraryIndex(svc) {
   const base = tautulliBase(svc)
   const libsRes = await safeFetch(`${base}&cmd=get_libraries`, {}, 15000)
@@ -362,6 +483,7 @@ async function tautulliLibraryIndex(svc) {
 
   const movies = new Map()
   const shows = new Map()
+  const byRatingKey = new Map()
   let anyOk = false
 
   libraries.forEach((lib, i) => {
@@ -372,12 +494,15 @@ async function tautulliLibraryIndex(svc) {
     for (const row of r.data?.response?.data?.data ?? []) {
       if (!row.title) continue
       const entry = {
-        ratingKey: row.rating_key ?? null,
+        ratingKey: row.rating_key != null ? String(row.rating_key) : null,
         playCount: Number(row.play_count) || 0,
         lastPlayed: row.last_played ? Number(row.last_played) * 1000 : null,
         fileSize: Number(row.file_size) || 0,
         library: lib.section_name,
       }
+      // Rating key is the exact join with Plex; the title keys below are only
+      // a backstop for when the Plex index is unavailable.
+      if (entry.ratingKey) byRatingKey.set(entry.ratingKey, entry)
       // First write wins — the list is size-ordered, so on a duplicate title
       // that keeps the bigger copy, which is the one worth reporting on.
       for (const key of watchKeys(row.title, row.year)) {
@@ -386,17 +511,34 @@ async function tautulliLibraryIndex(svc) {
     }
   })
 
-  return anyOk ? { movies, shows } : null
+  return anyOk ? { movies, shows, byRatingKey } : null
 }
 
-const lookupWatch = (index, kind, title, year) => {
-  if (!index) return undefined
-  const target = kind === 'movie' ? index.movies : index.shows
-  for (const key of watchKeys(title, year)) {
-    const hit = target.get(key)
-    if (hit) return hit
+// Resolution order: Plex guid -> rating key -> Tautulli row (exact), then a
+// title match against Tautulli directly (fuzzy, and only when Plex is absent).
+//
+// The `inPlex` distinction matters: an item Plex holds but Tautulli has no row
+// for has simply never been played, and must not be reported as an orphan.
+function lookupWatch({ guidIndex, tautulli }, kind, item) {
+  const ratingKey = resolveRatingKey(guidIndex, kind, item)
+
+  if (ratingKey) {
+    const row = tautulli?.byRatingKey.get(ratingKey)
+    return row
+      ? { ...row, inPlex: true }
+      : { ratingKey, playCount: 0, lastPlayed: null, fileSize: 0, inPlex: true }
   }
-  return undefined
+
+  // Plex says it isn't there — but only trust that if we actually had an index.
+  if (guidIndex) return { inPlex: false }
+
+  if (!tautulli) return undefined
+  const target = kind === 'movie' ? tautulli.movies : tautulli.shows
+  for (const key of watchKeys(item.title, item.year)) {
+    const hit = target.get(key)
+    if (hit) return { ...hit, inPlex: true }
+  }
+  return { inPlex: false }
 }
 
 // Every configured Radarr/Sonarr, primary and secondary, as a uniform list. The
@@ -440,9 +582,9 @@ export default async function mediaRoutes(fastify) {
     const staleMonths = intParam(request.query.staleMonths, 12, 1)
     const limit = Math.min(intParam(request.query.limit, 400, 1), 1000)
 
-    const tautulli = config.services.tautulli
+    const { tautulli, plex } = config.services
 
-    const [arrResults, indexResult] = await Promise.all([
+    const [arrResults, guidResult, tautulliResult] = await Promise.all([
       Promise.allSettled(
         targets.map((t) =>
           safeFetch(
@@ -452,10 +594,15 @@ export default async function mediaRoutes(fastify) {
           )
         )
       ),
+      // A scan is deliberate, so rebuild the Plex index rather than serving a
+      // cached one that could be up to ten minutes stale.
+      plex?.enabled ? plexGuidIndex(plex, { force: true }).catch(() => null) : Promise.resolve(null),
       tautulli?.enabled ? tautulliLibraryIndex(tautulli).catch(() => null) : Promise.resolve(null),
     ])
 
-    const watchIndex = indexResult
+    const guidIndex = guidResult
+    const tautulliIndex = tautulliResult
+    const watchIndex = guidIndex || tautulliIndex ? { guidIndex, tautulli: tautulliIndex } : null
     const now = Date.now()
     const neverPlayedBefore = now - neverPlayedDays * MS_PER_DAY
     const staleBefore = now - staleMonths * 30 * MS_PER_DAY
@@ -476,7 +623,7 @@ export default async function mediaRoutes(fastify) {
         // Nothing on disk means nothing to reclaim.
         if (!hasFile || size <= 0) continue
 
-        const watch = lookupWatch(watchIndex, t.kind, raw.title, raw.year)
+        const watch = watchIndex ? lookupWatch(watchIndex, t.kind, raw) : undefined
         const added = raw.added ? new Date(raw.added).getTime() : null
 
         items.push({
@@ -495,10 +642,10 @@ export default async function mediaRoutes(fastify) {
           quality: isMovie ? raw.movieFile?.quality?.quality?.name ?? null : null,
           ended: isMovie ? null : !!raw.ended,
           episodeFileCount: isMovie ? null : raw.statistics?.episodeFileCount ?? null,
-          playCount: watch ? watch.playCount : null,
+          playCount: watch?.inPlex ? watch.playCount ?? 0 : null,
           lastPlayed: watch?.lastPlayed ? new Date(watch.lastPlayed).toISOString() : null,
           lastPlayedMs: watch?.lastPlayed ?? null,
-          inPlex: watchIndex ? !!watch : null,
+          inPlex: watch ? watch.inPlex : null,
           lenses: [],
         })
       }
@@ -523,20 +670,19 @@ export default async function mediaRoutes(fastify) {
       }
     }
 
-    if (watchIndex) {
-      for (const item of items) {
-        if (item.inPlex === false) {
-          // Present in *arr with files, absent from every Plex library Tautulli
-          // tracks — usually a failed import or a library that needs a rescan.
-          item.lenses.push('orphans')
-          continue
-        }
-        if (item.playCount === 0) {
-          // Brand-new additions aren't stale, they just haven't had their chance yet.
-          if (item.addedMs == null || item.addedMs <= neverPlayedBefore) item.lenses.push('never-played')
-        } else if (item.lastPlayedMs != null && item.lastPlayedMs <= staleBefore) {
-          item.lenses.push('stale')
-        }
+    for (const item of items) {
+      if (item.inPlex === false) {
+        // Present in *arr with files, absent from Plex — usually a failed import
+        // or a library that needs a rescan. Needs only the Plex index, not Tautulli.
+        item.lenses.push('orphans')
+        continue
+      }
+      if (!tautulliIndex || item.inPlex !== true) continue
+      if (item.playCount === 0) {
+        // Brand-new additions aren't stale, they just haven't had their chance yet.
+        if (item.addedMs == null || item.addedMs <= neverPlayedBefore) item.lenses.push('never-played')
+      } else if (item.lastPlayedMs != null && item.lastPlayedMs <= staleBefore) {
+        item.lenses.push('stale')
       }
     }
 
@@ -556,10 +702,15 @@ export default async function mediaRoutes(fastify) {
       generatedAt: new Date().toISOString(),
       sources: {
         instances: reachable,
-        tautulli: !!watchIndex,
-        // Without Tautulli the watch-based lenses can't be computed at all —
-        // the UI uses this to explain why they're missing rather than empty.
-        watchLensesAvailable: !!watchIndex,
+        tautulli: !!tautulliIndex,
+        plex: !!guidIndex,
+        // The UI uses these to explain why a lens is unavailable rather than
+        // showing it as merely empty. Orphans only needs Plex to say what's in
+        // the library; never-played and stale need Tautulli's play counts.
+        watchLensesAvailable: !!tautulliIndex,
+        orphanLensAvailable: !!guidIndex || !!tautulliIndex,
+        // Exact id matching, rather than the title fallback.
+        exactMatching: !!guidIndex,
       },
       settings: { neverPlayedDays, staleMonths },
       totals: {
@@ -588,7 +739,10 @@ export default async function mediaRoutes(fastify) {
     const [historyR, profilesR, secondaryR] = await Promise.allSettled([
       safeFetch(`${base}/api/v3/history/movie?movieId=${id}`, { headers: arrH(radarr.apiKey) }),
       safeFetch(`${base}/api/v3/qualityprofile`, { headers: arrH(radarr.apiKey) }),
-      gatherSecondary(config, { kind: 'movie', title: m.title, year: m.year, tmdbId: m.tmdbId, arrId: id }),
+      gatherSecondary(config, {
+        kind: 'movie', title: m.title, year: m.year,
+        tmdbId: m.tmdbId, imdbId: m.imdbId, arrId: id,
+      }),
     ])
 
     const historyRes = settled(historyR)
@@ -652,7 +806,10 @@ export default async function mediaRoutes(fastify) {
     const [historyR, profilesR, secondaryR] = await Promise.allSettled([
       safeFetch(`${base}/api/v3/history/series?seriesId=${id}`, { headers: arrH(sonarr.apiKey) }),
       safeFetch(`${base}/api/v3/qualityprofile`, { headers: arrH(sonarr.apiKey) }),
-      gatherSecondary(config, { kind: 'series', title: s.title, year: s.year, tmdbId: s.tmdbId, arrId: id }),
+      gatherSecondary(config, {
+        kind: 'series', title: s.title, year: s.year,
+        tmdbId: s.tmdbId, tvdbId: s.tvdbId, imdbId: s.imdbId, arrId: id,
+      }),
     ])
 
     const historyRes = settled(historyR)

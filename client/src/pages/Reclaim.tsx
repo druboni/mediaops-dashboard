@@ -41,7 +41,14 @@ interface Candidate {
 
 interface ReclaimResponse {
   generatedAt: string
-  sources: { instances: string[]; tautulli: boolean; watchLensesAvailable: boolean }
+  sources: {
+    instances: string[]
+    tautulli: boolean
+    plex: boolean
+    watchLensesAvailable: boolean
+    orphanLensAvailable: boolean
+    exactMatching: boolean
+  }
   settings: { neverPlayedDays: number; staleMonths: number }
   totals: { scanned: number; bytesOnDisk: number }
   lensTotals: Record<Lens, { count: number; bytes: number }>
@@ -69,32 +76,44 @@ function timeAgo(d: string | null) {
   return `${Math.floor(months / 12)}y ago`
 }
 
-const LENS_META: Record<Lens, { label: string; blurb: string; needsTautulli: boolean }> = {
+type LensNeed = 'none' | 'watch' | 'library'
+
+const LENS_META: Record<Lens, { label: string; blurb: string; needs: LensNeed }> = {
   'never-played': {
     label: 'Never Played',
     blurb: 'Has files, zero plays in Tautulli, and old enough to have had a fair chance.',
-    needsTautulli: true,
+    needs: 'watch',
   },
   stale: {
     label: 'Not Played Recently',
     blurb: 'Was watched once, but not for a long time.',
-    needsTautulli: true,
+    needs: 'watch',
   },
   largest: {
     label: 'Largest Files',
     blurb: 'The biggest things on disk, regardless of whether anyone watches them.',
-    needsTautulli: false,
+    needs: 'none',
   },
   duplicates: {
     label: 'Duplicates',
     blurb: 'The same title held by more than one instance — usually a 4K and a 1080p copy.',
-    needsTautulli: false,
+    needs: 'none',
   },
   orphans: {
     label: 'Orphans',
-    blurb: 'Files tracked by Radarr/Sonarr that no Plex library knows about. Often a failed import.',
-    needsTautulli: true,
+    blurb: 'Files tracked by Radarr/Sonarr that Plex has no record of. Often a failed import.',
+    needs: 'library',
   },
+}
+
+// 'watch' needs Tautulli's play counts; 'library' only needs something that can
+// say what's actually in Plex, which either Plex or Tautulli can answer.
+const lensBlocked = (lens: Lens, sources?: ReclaimResponse['sources']) => {
+  if (!sources) return false
+  const need = LENS_META[lens].needs
+  if (need === 'watch') return !sources.watchLensesAvailable
+  if (need === 'library') return !sources.orphanLensAvailable
+  return false
 }
 
 const LENS_ORDER: Lens[] = ['never-played', 'stale', 'largest', 'duplicates', 'orphans']
@@ -280,7 +299,7 @@ export default function Reclaim() {
   }
 
   const meta = LENS_META[lens]
-  const lensUnavailable = meta.needsTautulli && data && !data.sources.watchLensesAvailable
+  const lensUnavailable = lensBlocked(lens, data?.sources)
 
   return (
     <div className={`p-6 transition-all duration-200 ${detail ? 'sm:pr-[436px]' : ''}`}>
@@ -304,13 +323,23 @@ export default function Reclaim() {
         </button>
       </div>
 
-      {/* Tautulli notice */}
+      {/* Source notices */}
       {data && !data.sources.tautulli && (
         <div className="mb-5 bg-yellow-900/20 border border-yellow-900/60 rounded-lg px-4 py-3">
           <p className="text-xs text-yellow-400 font-medium">Tautulli not connected</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            Largest Files and Duplicates still work. Never Played, Not Played Recently and Orphans need Tautulli's
+            Largest Files, Duplicates and Orphans still work. Never Played and Not Played Recently need Tautulli's
             watch history — connect it in Settings to enable them.
+          </p>
+        </div>
+      )}
+      {data && data.sources.tautulli && !data.sources.exactMatching && (
+        <div className="mb-5 bg-yellow-900/20 border border-yellow-900/60 rounded-lg px-4 py-3">
+          <p className="text-xs text-yellow-400 font-medium">Matching by title</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Plex isn't connected, so titles are matched by name rather than by ID. Alternate editions and
+            year-suffixed show names can be misreported — Orphans especially. Connect Plex in Settings for exact
+            matching.
           </p>
         </div>
       )}
@@ -319,12 +348,12 @@ export default function Reclaim() {
       <div className="flex gap-2 mb-4 flex-wrap">
         {LENS_ORDER.map((l) => {
           const totals = data?.lensTotals?.[l]
-          const disabled = LENS_META[l].needsTautulli && data && !data.sources.watchLensesAvailable
+          const disabled = lensBlocked(l, data?.sources)
           return (
             <button
               key={l}
               onClick={() => setLens(l)}
-              disabled={!!disabled}
+              disabled={disabled}
               className={`px-3 py-2 rounded-lg text-xs border transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed ${
                 lens === l
                   ? 'bg-blue-600 border-blue-600 text-white'
