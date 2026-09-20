@@ -51,7 +51,7 @@ interface ReclaimResponse {
   }
   settings: { neverPlayedDays: number; staleMonths: number }
   totals: { scanned: number; bytesOnDisk: number }
-  lensTotals: Record<Lens, { count: number; bytes: number }>
+  lensTotals: Record<Lens, { count: number; bytes: number; shown: number }>
   candidates: Candidate[]
 }
 
@@ -369,7 +369,14 @@ export default function Reclaim() {
         })}
       </div>
 
-      <p className="text-xs text-gray-500 mb-4">{meta.blurb}</p>
+      <p className="text-xs text-gray-500 mb-4">
+        {meta.blurb}
+        {data && data.lensTotals[lens].shown < data.lensTotals[lens].count && (
+          <span className="text-gray-600">
+            {' '}Showing the largest {data.lensTotals[lens].shown} of {data.lensTotals[lens].count}.
+          </span>
+        )}
+      </p>
 
       {/* Thresholds */}
       {(lens === 'never-played' || lens === 'stale') && (

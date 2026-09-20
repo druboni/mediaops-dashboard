@@ -690,12 +690,32 @@ export default async function mediaRoutes(fastify) {
     const bySize = [...items].sort((a, b) => b.size - a.size)
     for (const item of bySize.slice(0, 50)) item.lenses.push('largest')
 
-    const candidates = bySize.filter((i) => i.lenses.length > 0).slice(0, limit)
+    // Cap per lens rather than globally. A single global cut ordered by size
+    // silently drops the tail of a small lens — a 6-item orphan list showing 5
+    // rows while its tab still said 6 — because large items from other lenses
+    // fill the budget first.
+    const LENSES = ['never-played', 'stale', 'largest', 'duplicates', 'orphans']
+    const selected = new Map()
+    for (const lens of LENSES) {
+      for (const item of bySize.filter((i) => i.lenses.includes(lens)).slice(0, limit)) {
+        selected.set(item.key, item)
+      }
+    }
+    const candidates = [...selected.values()].sort((a, b) => b.size - a.size)
 
+    // `shown` is counted off the final candidate list, not off each lens's own
+    // slice: the list is a union, so an item pulled in by one lens still shows
+    // under every other lens it matches. Counting the slice would understate it.
     const lensTotals = {}
-    for (const lens of ['never-played', 'stale', 'largest', 'duplicates', 'orphans']) {
+    for (const lens of LENSES) {
       const matching = items.filter((i) => i.lenses.includes(lens))
-      lensTotals[lens] = { count: matching.length, bytes: matching.reduce((sum, i) => sum + i.size, 0) }
+      lensTotals[lens] = {
+        count: matching.length,
+        bytes: matching.reduce((sum, i) => sum + i.size, 0),
+        // Lets the UI say "showing the largest 400 of 900" rather than quietly
+        // disagreeing with its own tab count.
+        shown: candidates.filter((i) => i.lenses.includes(lens)).length,
+      }
     }
 
     return {
