@@ -182,6 +182,71 @@ function ConfirmDelete({
   )
 }
 
+// ── Sorting ────────────────────────────────────────────────────────────────
+
+type SortKey = 'title' | 'instance' | 'lastPlayed' | 'added' | 'size'
+type SortDir = 'asc' | 'desc'
+
+// Text columns default to A→Z on first click; everything else (dates, size)
+// defaults to biggest/most-recent first, since that's the order Reclaim's
+// whole premise cares about.
+const DEFAULT_DIR: Record<SortKey, SortDir> = {
+  title: 'asc',
+  instance: 'asc',
+  lastPlayed: 'desc',
+  added: 'desc',
+  size: 'desc',
+}
+
+// Never-played items have no lastPlayed date at all. Rather than let them land
+// wherever a null happens to sort, they're pinned to the "never" end regardless
+// of direction — descending still means "most recently played first", it's just
+// that "never" is the natural end of that ordering, not an arbitrary null slot.
+function compareCandidates(a: Candidate, b: Candidate, key: SortKey, dir: SortDir): number {
+  const sign = dir === 'asc' ? 1 : -1
+
+  if (key === 'title') return sign * a.title.localeCompare(b.title)
+  if (key === 'instance') return sign * a.instance.localeCompare(b.instance)
+  if (key === 'size') return sign * (a.size - b.size)
+
+  const field = key === 'lastPlayed' ? 'lastPlayed' : 'added'
+  const av = a[field] ? new Date(a[field] as string).getTime() : null
+  const bv = b[field] ? new Date(b[field] as string).getTime() : null
+  if (av == null && bv == null) return 0
+  if (av == null) return 1
+  if (bv == null) return -1
+  return sign * (av - bv)
+}
+
+function SortableHeader({
+  label, columnKey, align = 'left', activeKey, sortDir, onSort, className = '',
+}: {
+  label: string
+  columnKey: SortKey
+  align?: 'left' | 'right'
+  activeKey: SortKey
+  sortDir: SortDir
+  onSort: (key: SortKey) => void
+  className?: string
+}) {
+  const active = activeKey === columnKey
+  return (
+    <th className={`px-4 py-2.5 font-medium ${align === 'right' ? 'text-right' : 'text-left'} ${className}`}>
+      <button
+        onClick={() => onSort(columnKey)}
+        className={`inline-flex items-center gap-1 transition-colors ${
+          align === 'right' ? 'flex-row-reverse' : ''
+        } ${active ? 'text-gray-200' : 'text-gray-500 hover:text-gray-300'}`}
+      >
+        {label}
+        <span className={`text-[10px] w-2.5 inline-block ${active ? 'opacity-100' : 'opacity-0'}`}>
+          {active && sortDir === 'asc' ? '▲' : '▼'}
+        </span>
+      </button>
+    </th>
+  )
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function Reclaim() {
@@ -196,6 +261,8 @@ export default function Reclaim() {
   const [result, setResult] = useState<string | null>(null)
   const [neverPlayedDays, setNeverPlayedDays] = useState(90)
   const [staleMonths, setStaleMonths] = useState(12)
+  const [sortKey, setSortKey] = useState<SortKey>('size')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const enabled = enabledServices.includes('radarr') || enabledServices.includes('sonarr')
 
@@ -211,9 +278,19 @@ export default function Reclaim() {
   })
 
   const rows = useMemo(
-    () => (data?.candidates ?? []).filter((c) => c.lenses.includes(lens)),
-    [data, lens]
+    () =>
+      (data?.candidates ?? [])
+        .filter((c) => c.lenses.includes(lens))
+        .sort((a, b) => compareCandidates(a, b, sortKey, sortDir)),
+    [data, lens, sortKey, sortDir]
   )
+
+  // Clicking the active column flips direction; clicking a new one switches to
+  // it at that column's natural default direction.
+  const onSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir(DEFAULT_DIR[key]) }
+  }
 
   const selected = useMemo(
     () => (data?.candidates ?? []).filter((c) => selectedKeys.has(c.key)),
@@ -347,12 +424,13 @@ export default function Reclaim() {
       {/* Lens tabs */}
       <div className="flex gap-2 mb-4 flex-wrap">
         {LENS_ORDER.map((l) => {
+          const selectLens = () => { setLens(l); setSortKey('size'); setSortDir('desc') }
           const totals = data?.lensTotals?.[l]
           const disabled = lensBlocked(l, data?.sources)
           return (
             <button
               key={l}
-              onClick={() => setLens(l)}
+              onClick={selectLens}
               disabled={disabled}
               className={`px-3 py-2 rounded-lg text-xs border transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed ${
                 lens === l
@@ -489,11 +567,11 @@ export default function Reclaim() {
                     aria-label="Select all visible"
                   />
                 </th>
-                <th className="text-left px-4 py-2.5 font-medium">Title</th>
-                <th className="text-left px-4 py-2.5 font-medium hidden md:table-cell">Instance</th>
-                <th className="text-left px-4 py-2.5 font-medium hidden lg:table-cell">Last Played</th>
-                <th className="text-left px-4 py-2.5 font-medium hidden lg:table-cell">Added</th>
-                <th className="text-right px-4 py-2.5 font-medium">Size</th>
+                <SortableHeader label="Title"       columnKey="title"      activeKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                <SortableHeader label="Instance"    columnKey="instance"   activeKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden md:table-cell" />
+                <SortableHeader label="Last Played" columnKey="lastPlayed" activeKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden lg:table-cell" />
+                <SortableHeader label="Added"       columnKey="added"      activeKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden lg:table-cell" />
+                <SortableHeader label="Size"         columnKey="size"      activeKey={sortKey} sortDir={sortDir} onSort={onSort} align="right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/50">
