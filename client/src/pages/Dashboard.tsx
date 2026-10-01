@@ -321,7 +321,14 @@ export default function Dashboard() {
             <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
               {data.plexStreams.map((s, i) => {
                 const pct = s.duration ? Math.round((s.viewOffset / s.duration) * 100) : null
-                const res = s.videoResolution === '4k' ? '4K' : s.videoResolution ? `${s.videoResolution}p` : null
+                // Plex's videoResolution is usually a bare number ("1080"), but some
+                // sources report it with the "p" already on ("1080p") — strip any
+                // trailing p before adding ours so it can't end up doubled.
+                const res = !s.videoResolution
+                  ? null
+                  : /^4k$/i.test(s.videoResolution)
+                    ? '4K'
+                    : `${s.videoResolution.replace(/p$/i, '')}p`
                 const codec = [res, s.videoCodec?.toUpperCase(), s.audioCodec?.toUpperCase()].filter(Boolean).join(' · ')
                 const methodColor = s.playMethod === 'direct play' ? 'text-green-400' : s.playMethod === 'transcode' ? 'text-yellow-400' : 'text-blue-400'
                 return (
