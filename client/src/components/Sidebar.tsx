@@ -7,13 +7,17 @@ import type { ServiceName, QuickLink } from '../types'
 
 declare const __APP_VERSION__: string
 
+type BadgeKey = 'activeDownloads' | 'pendingRequests' | 'openIssues' | 'failingIndexers'
+
 interface NavItem {
   label: string
   path: string
   service?: ServiceName
   anyOf?: ServiceName[]
-  /** Nav entries that can carry a count badge, keyed by what the badge counts. */
-  badge?: 'openIssues'
+  /** Count badges this nav entry can carry — lets you tell from any page
+   * whether something's actively happening without opening it. Each is only
+   * shown once its count is above zero. */
+  badges?: BadgeKey[]
 }
 
 interface NavSection {
@@ -36,19 +40,19 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Requests',
     items: [
-      { label: 'Requests', path: '/requests', service: 'overseerr', badge: 'openIssues' },
+      { label: 'Requests', path: '/requests', service: 'overseerr', badges: ['pendingRequests', 'openIssues'] },
     ],
   },
   {
     label: 'Downloads',
     items: [
-      { label: 'Downloads', path: '/downloads', anyOf: ['qbittorrent', 'nzbget'] },
+      { label: 'Downloads', path: '/downloads', anyOf: ['qbittorrent', 'nzbget'], badges: ['activeDownloads'] },
     ],
   },
   {
     label: 'Indexers',
     items: [
-      { label: 'Indexers', path: '/indexers', anyOf: ['prowlarr', 'jackett'] },
+      { label: 'Indexers', path: '/indexers', anyOf: ['prowlarr', 'jackett'], badges: ['failingIndexers'] },
     ],
   },
   {
@@ -83,18 +87,64 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const isActive = (path: string) => location.pathname === path
 
-  // Reuses the dashboard payload, which already carries the open-issue count —
-  // the sidebar is mounted everywhere, so this must not add a request of its own.
-  const { data: dashboard } = useQuery<{ stats?: { openIssues: number | null } }>({
+  // Reuses the same 'dashboard' query key the Dashboard page itself polls —
+  // when that page is open, this just reads its cache; when it isn't, this
+  // query key still exists on every page (the sidebar is mounted everywhere),
+  // so navigating around the app keeps the counts current without the sidebar
+  // running its own continuous poll on top of the page's.
+  const { data: dashboard } = useQuery<{
+    stats?: { pendingRequests: number | null; openIssues: number | null }
+    downloads?: {
+      qbittorrent: { active: number } | null
+      nzbget: { active: number } | null
+    }
+  }>({
     queryKey: ['dashboard'],
     queryFn: async () => (await api.get('/dashboard')).data,
-    enabled: enabledServices.includes('overseerr'),
+    enabled: enabledServices.includes('overseerr') || enabledServices.includes('qbittorrent') || enabledServices.includes('nzbget'),
     staleTime: 30_000,
   })
-  const openIssues = dashboard?.stats?.openIssues ?? 0
 
-  const badgeFor = (item: NavItem) =>
-    item.badge === 'openIssues' && openIssues > 0 ? openIssues : null
+  // Indexer failures aren't on the dashboard payload — they live on /api/health,
+  // which Dashboard.tsx also queries under the same key, so this is the same
+  // reuse-the-cache trick as above rather than a second independent poll.
+  const { data: health } = useQuery<{ indexerStatus: unknown[] }>({
+    queryKey: ['health'],
+    queryFn: async () => (await api.get('/health')).data,
+    enabled: enabledServices.includes('prowlarr'),
+    staleTime: 60_000,
+  })
+
+  const badgeCounts: Record<BadgeKey, number> = {
+    activeDownloads: (dashboard?.downloads?.qbittorrent?.active ?? 0) + (dashboard?.downloads?.nzbget?.active ?? 0),
+    pendingRequests: dashboard?.stats?.pendingRequests ?? 0,
+    openIssues: dashboard?.stats?.openIssues ?? 0,
+    failingIndexers: health?.indexerStatus?.length ?? 0,
+  }
+
+  const BADGE_TONE: Record<BadgeKey, 'red' | 'amber' | 'blue'> = {
+    activeDownloads: 'blue',   // informational — things are moving, not a problem
+    pendingRequests: 'amber',  // needs a decision from you
+    openIssues: 'red',         // someone reported something broken
+    failingIndexers: 'red',    // an indexer stopped working
+  }
+
+  const BADGE_LABEL: Record<BadgeKey, string> = {
+    activeDownloads: 'active download',
+    pendingRequests: 'pending request',
+    openIssues: 'open issue',
+    failingIndexers: 'failing indexer',
+  }
+
+  const badgesFor = (item: NavItem): Badge[] =>
+    (item.badges ?? [])
+      .map((key) => ({ key, value: badgeCounts[key] }))
+      .filter((b) => b.value > 0)
+      .map((b) => ({
+        value: b.value,
+        tone: BADGE_TONE[b.key],
+        title: `${b.value} ${BADGE_LABEL[b.key]}${b.value === 1 ? '' : 's'}`,
+      }))
 
   const links: QuickLink[] = config?.links ?? []
 
@@ -132,7 +182,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                   path={item.path}
                   label={item.label}
                   active={isActive(item.path)}
-                  badge={badgeFor(item)}
+                  badges={badgesFor(item)}
                   onNavigate={onClose}
                 />
               ))}
@@ -178,13 +228,25 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
   )
 }
 
+interface Badge {
+  value: number
+  tone: 'red' | 'amber' | 'blue'
+  title: string
+}
+
+const BADGE_TONE_CLASS: Record<Badge['tone'], string> = {
+  red: 'bg-red-900/70 text-red-300',
+  amber: 'bg-amber-900/60 text-amber-300',
+  blue: 'bg-blue-900/60 text-blue-300',
+}
+
 function NavLink({
-  path, label, active, badge, onNavigate,
+  path, label, active, badges, onNavigate,
 }: {
   path: string
   label: string
   active: boolean
-  badge?: number | null
+  badges?: Badge[]
   onNavigate: () => void
 }) {
   return (
@@ -196,12 +258,17 @@ function NavLink({
       }`}
     >
       <span className="truncate">{label}</span>
-      {badge != null && (
-        <span
-          className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-900/70 text-red-300 shrink-0 tabular-nums"
-          title={`${badge} open issue${badge === 1 ? '' : 's'}`}
-        >
-          {badge}
+      {badges && badges.length > 0 && (
+        <span className="flex items-center gap-1 shrink-0">
+          {badges.map((b, i) => (
+            <span
+              key={i}
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full tabular-nums ${BADGE_TONE_CLASS[b.tone]}`}
+              title={b.title}
+            >
+              {b.value}
+            </span>
+          ))}
         </span>
       )}
     </Link>
