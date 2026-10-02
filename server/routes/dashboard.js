@@ -273,8 +273,8 @@ async function getQbitData(url, userpass) {
       ? await fetch(`${url}/api/v2/transfer/info`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json())
       : await probe.json()
 
-    const [active, completed, versionText] = await Promise.all([
-      fetch(`${url}/api/v2/torrents/info?filter=active`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
+    const [all, completed, versionText] = await Promise.all([
+      fetch(`${url}/api/v2/torrents/info?filter=all`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/torrents/info?filter=completed&sort=completion_on&reverse=true&limit=10`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.json()),
       fetch(`${url}/api/v2/app/version`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) }).then((r) => r.text()).catch(() => null),
     ])
@@ -283,11 +283,16 @@ async function getQbitData(url, userpass) {
           .filter((t) => t.completion_on > 0)
           .map((t) => ({ name: t.name, date: new Date(t.completion_on * 1000).toISOString(), size: t.size, client: 'qbittorrent' }))
       : []
+    // "active" here means "in the queue", matching the Downloads page's own
+    // count — not qBittorrent's filter=active, which only counts torrents
+    // currently transferring and undercounts anything queued/stalled/paused.
+    const COMPLETED_STATES = ['uploading', 'forcedUP', 'stalledUP', 'queuedUP', 'pausedUP', 'checkingUP']
+    const queueCount = Array.isArray(all) ? all.filter((t) => !COMPLETED_STATES.includes(t.state)).length : 0
     return {
       health: { ok: true, ...(versionText ? { version: versionText.trim() } : {}) },
       dlSpeed: info.dl_info_speed || 0,
       upSpeed: info.up_info_speed || 0,
-      activeCount: Array.isArray(active) ? active.length : 0,
+      activeCount: queueCount,
       recentlyDownloaded,
     }
   } catch (err) {
@@ -302,10 +307,11 @@ async function getNzbgetData(url, userpass) {
   const auth = Buffer.from(`${user}:${pass}`).toString('base64')
   const headers = { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` }
 
-  const [statusRes, histRes, versionRes] = await Promise.all([
+  const [statusRes, histRes, versionRes, groupsRes] = await Promise.all([
     safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'status', params: [] }) }),
     safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'history', params: [false] }) }),
     safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'version', params: [] }) }),
+    safeFetch(`${url}/jsonrpc`, { method: 'POST', headers, body: JSON.stringify({ version: '1.1', method: 'listgroups', params: [0] }) }),
   ])
   if (!statusRes.ok) return { health: { ok: false, error: statusRes.error } }
   const nzbVersion = versionRes.ok ? versionRes.data?.result : null
@@ -317,10 +323,11 @@ async function getNzbgetData(url, userpass) {
         .slice(0, 10)
         .map((h) => ({ name: h.NZBName, date: new Date(h.HistoryTime * 1000).toISOString(), size: h.FileSizeMB * 1024 * 1024, client: 'nzbget' }))
     : []
+  const queueCount = groupsRes.ok && Array.isArray(groupsRes.data?.result) ? groupsRes.data.result.length : 0
   return {
     health: { ok: true, ...(nzbVersion ? { version: nzbVersion } : {}) },
     dlSpeed: result.DownloadRate || 0,
-    activeCount: (result.RemainingSizeMB || 0) > 0 ? 1 : 0,
+    activeCount: queueCount,
     recentlyDownloaded,
   }
 }
