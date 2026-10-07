@@ -4,3 +4,5 @@ config/config.json
 .git/
 .gitignore
 *.md
+dist-share/
+calendar-share/.env

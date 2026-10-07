@@ -1,13 +1,14 @@
 {
   "name": "mediaops-dashboard",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:server": "node --watch server/index.js",
     "build": "vite build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "build:share": "vite build --config vite.share.config.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

@@ -5,3 +5,6 @@ config/app.log*
 config/backups/
 .env
 __pycache__/
+
+dist-share/
+calendar-share/.env

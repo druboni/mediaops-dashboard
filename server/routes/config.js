@@ -58,7 +58,12 @@ const DEFAULT_CONFIG = {
   // routes/publicCalendar.js). Off by default — sharing is an explicit choice.
   publicCalendar: {
     enabled: false,
+    // In the /share/calendar/<secret> link you can hand to someone on your network.
     secret: '',
+    // Sent as a header by the standalone calendar container (calendar-share/).
+    // Kept separate from `secret` so revoking a link you handed someone
+    // doesn't take the public site down, and vice versa.
+    feedToken: '',
   },
 }
 
@@ -92,6 +97,10 @@ export async function getConfig() {
   }
   if (!merged.publicCalendar.secret) {
     merged.publicCalendar.secret = randomBytes(16).toString('hex')
+    healed = true
+  }
+  if (!merged.publicCalendar.feedToken) {
+    merged.publicCalendar.feedToken = randomBytes(32).toString('hex')
     healed = true
   }
   if (healed) await saveConfig(merged)
@@ -166,14 +175,18 @@ export default async function configRoutes(fastify) {
     return updated
   })
 
-  // Rotates the share secret, which kills any link already handed out. The only
-  // way the secret changes — it's never accepted from a client in the PUT above.
-  fastify.post('/public-calendar/regenerate', async () => {
+  // Rotates the share link secret (?kind=link, the default) or the calendar
+  // container's token (?kind=token), killing whatever was using the old one.
+  // The only way either changes — neither is ever accepted from a client in
+  // the PUT above.
+  fastify.post('/public-calendar/regenerate', async (request, reply) => {
+    const kind = request.query?.kind ?? 'link'
+    if (kind !== 'link' && kind !== 'token') return reply.status(400).send({ error: 'kind must be link or token' })
     const current = await getConfig()
-    const updated = {
-      ...current,
-      publicCalendar: { ...current.publicCalendar, secret: randomBytes(16).toString('hex') },
-    }
+    const fresh = kind === 'link'
+      ? { secret: randomBytes(16).toString('hex') }
+      : { feedToken: randomBytes(32).toString('hex') }
+    const updated = { ...current, publicCalendar: { ...current.publicCalendar, ...fresh } }
     await saveConfig(updated)
     return { publicCalendar: updated.publicCalendar }
   })

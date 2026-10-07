@@ -66,9 +66,12 @@ export interface SpeedtestResult {
 }
 
 export interface PublicCalendarConfig {
+  /** Master switch — off disables both the link and the container token. */
   enabled: boolean
-  /** Server-generated; only ever changed via the regenerate endpoint. */
+  /** In the /share/calendar/<secret> link. Server-generated; only changed via regenerate. */
   secret: string
+  /** Sent by the standalone calendar container. Server-generated; only changed via regenerate. */
+  feedToken: string
 }
 
 export interface Config {

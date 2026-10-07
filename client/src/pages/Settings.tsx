@@ -61,9 +61,11 @@ export default function Settings() {
   const [monitoredServers, setMonitoredServers] = useState<MonitoredServer[]>([])
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [shareCalendar, setShareCalendar] = useState(false)
-  const [shareCopied, setShareCopied] = useState(false)
-  const [regenerating, setRegenerating] = useState(false)
+  const [copied, setCopied] = useState<'link' | 'token' | null>(null)
+  const [regenerating, setRegenerating] = useState<'link' | 'token' | null>(null)
+  const [showToken, setShowToken] = useState(false)
   const shareInputRef = useRef<HTMLInputElement>(null)
+  const tokenInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
   const [notifications, setNotifications] = useState<NotificationsConfig>({
     discordWebhookUrl: '', mediaAddedEnabled: false, issueReportedEnabled: false, webhookSecret: '',
@@ -133,32 +135,34 @@ export default function Settings() {
   // navigator.clipboard only exists on secure origins (https or localhost), and
   // MediaOps is usually reached over plain http on the LAN — so fall back to
   // selecting the text, which at least leaves Ctrl+C one keypress away.
-  const copyShareUrl = async () => {
+  const copyText = async (which: 'link' | 'token', text: string, input: HTMLInputElement | null) => {
+    const done = () => { setCopied(which); setTimeout(() => setCopied(null), 2000) }
     try {
-      await navigator.clipboard.writeText(shareUrl)
-      setShareCopied(true)
-      setTimeout(() => setShareCopied(false), 2000)
+      await navigator.clipboard.writeText(text)
+      done()
     } catch {
-      shareInputRef.current?.select()
-      try {
-        if (document.execCommand('copy')) {
-          setShareCopied(true)
-          setTimeout(() => setShareCopied(false), 2000)
-        }
-      } catch { /* selection is left in place for a manual copy */ }
+      // A password-type input can't be copied from, so briefly reveal it.
+      if (input) { input.type = 'text'; input.select() }
+      try { if (document.execCommand('copy')) done() } catch { /* selection left for a manual copy */ }
+      if (input && which === 'token' && !showToken) input.type = 'password'
     }
   }
 
-  const regenerateShareUrl = async () => {
-    if (!window.confirm('Generate a new link? Anyone using the current link will lose access.')) return
-    setRegenerating(true)
+  const regenerate = async (which: 'link' | 'token') => {
+    const warning = which === 'link'
+      ? 'Generate a new link? Anyone using the current link will lose access.'
+      : 'Generate a new token? The calendar container stops working until you put the new token in its .env and restart it.'
+    if (!window.confirm(warning)) return
+    setRegenerating(which)
     try {
-      const res = await api.post<{ publicCalendar: NonNullable<Config['publicCalendar']> }>('/config/public-calendar/regenerate')
+      const res = await api.post<{ publicCalendar: NonNullable<Config['publicCalendar']> }>(
+        '/config/public-calendar/regenerate', null, { params: { kind: which } }
+      )
       queryClient.setQueryData<Config>(['config'], (prev) =>
         prev ? { ...prev, publicCalendar: res.data.publicCalendar } : prev
       )
     } finally {
-      setRegenerating(false)
+      setRegenerating(null)
     }
   }
 
@@ -169,7 +173,11 @@ export default function Settings() {
       await updateConfig({
         ...config!, services, links, autoDeleteAfterImport, notifications, additionalInstances, monitoredServers,
         // Only `enabled` is honoured server-side; the secret is never taken from here.
-        publicCalendar: { secret: config?.publicCalendar?.secret ?? '', enabled: shareCalendar },
+        publicCalendar: {
+          secret: config?.publicCalendar?.secret ?? '',
+          feedToken: config?.publicCalendar?.feedToken ?? '',
+          enabled: shareCalendar,
+        },
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
@@ -405,13 +413,13 @@ export default function Settings() {
       <section className="mt-10 pt-8 border-t border-gray-800">
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Sharing</h2>
         <p className="text-xs text-gray-600 mb-4">Let people see what's coming up without giving them the dashboard</p>
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-white font-medium mb-0.5">Public calendar link</p>
+              <p className="text-sm text-white font-medium mb-0.5">Public calendar</p>
               <p className="text-xs text-gray-500 leading-relaxed">
-                A read-only page showing the Calendar — upcoming episodes and movie releases, nothing else.
-                No sign-in, no sidebar, no way into the rest of MediaOps from it.
+                A read-only page showing upcoming episodes and movie releases — nothing else, no sign-in, no way
+                into the rest of MediaOps. Turning this off immediately disables both the link and the container below.
               </p>
             </div>
             <div className="shrink-0 mt-0.5">
@@ -419,41 +427,81 @@ export default function Settings() {
             </div>
           </div>
 
+          {shareCalendar && !config?.publicCalendar?.enabled && (
+            <p className="text-xs text-yellow-400">Save Changes to turn sharing on.</p>
+          )}
+
           {shareCalendar && shareUrl && (
             <>
-              <div className="flex gap-2">
-                <input
-                  ref={shareInputRef}
-                  readOnly
-                  value={shareUrl}
-                  onFocus={(e) => e.target.select()}
-                  className="input flex-1 text-xs font-mono"
-                />
-                <button
-                  onClick={copyShareUrl}
-                  className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
-                >
-                  {shareCopied ? 'Copied!' : 'Copy'}
-                </button>
-                <button
-                  onClick={regenerateShareUrl}
-                  disabled={regenerating}
-                  className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap disabled:opacity-50"
-                  title="Replace the link — the old one stops working"
-                >
-                  {regenerating ? 'Working…' : 'New link'}
-                </button>
+              {/* Link for people on this network */}
+              <div className="pt-3 border-t border-gray-800">
+                <p className="text-xs text-gray-300 font-medium mb-1">Link for your network</p>
+                <p className="text-xs text-gray-500 mb-2">For people who can already reach this server, like your household.</p>
+                <div className="flex gap-2">
+                  <input
+                    ref={shareInputRef}
+                    readOnly
+                    value={shareUrl}
+                    onFocus={(e) => e.target.select()}
+                    className="input flex-1 text-xs font-mono"
+                  />
+                  <button
+                    onClick={() => copyText('link', shareUrl, shareInputRef.current)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                  >
+                    {copied === 'link' ? 'Copied!' : 'Copy'}
+                  </button>
+                  <button
+                    onClick={() => regenerate('link')}
+                    disabled={regenerating !== null}
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap disabled:opacity-50"
+                    title="Replace the link — the old one stops working"
+                  >
+                    {regenerating === 'link' ? 'Working…' : 'New link'}
+                  </button>
+                </div>
               </div>
-              {!config?.publicCalendar?.enabled && (
-                <p className="text-xs text-yellow-400">Save Changes to turn this link on.</p>
-              )}
-              <p className="text-xs text-gray-600 leading-relaxed">
-                The link only works for people who can reach this server. To share it beyond your network,
-                expose just <code className="text-gray-400">/share/calendar/</code>,{' '}
-                <code className="text-gray-400">/api/public/calendar/</code> and the page's{' '}
-                <code className="text-gray-400">/assets/</code> through your reverse proxy — not the whole port,
-                since MediaOps has no real login.
-              </p>
+
+              {/* Token for the standalone container */}
+              <div className="pt-3 border-t border-gray-800">
+                <p className="text-xs text-gray-300 font-medium mb-1">Calendar container token</p>
+                <p className="text-xs text-gray-500 mb-2 leading-relaxed">
+                  For sharing beyond your network. The <code className="text-gray-400">calendar-share</code> container
+                  serves just this page and reads from MediaOps with this token, so your reverse proxy only ever
+                  points at the container — never at MediaOps. Put it in the container's{' '}
+                  <code className="text-gray-400">.env</code> as <code className="text-gray-400">CALENDAR_TOKEN=</code>.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    ref={tokenInputRef}
+                    readOnly
+                    type={showToken ? 'text' : 'password'}
+                    value={config?.publicCalendar?.feedToken ?? ''}
+                    onFocus={(e) => e.target.select()}
+                    className="input flex-1 text-xs font-mono"
+                  />
+                  <button
+                    onClick={() => setShowToken((v) => !v)}
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap"
+                  >
+                    {showToken ? 'Hide' : 'Show'}
+                  </button>
+                  <button
+                    onClick={() => copyText('token', config?.publicCalendar?.feedToken ?? '', tokenInputRef.current)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                  >
+                    {copied === 'token' ? 'Copied!' : 'Copy'}
+                  </button>
+                  <button
+                    onClick={() => regenerate('token')}
+                    disabled={regenerating !== null}
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap disabled:opacity-50"
+                    title="Replace the token — the container stops working until it's updated"
+                  >
+                    {regenerating === 'token' ? 'Working…' : 'New token'}
+                  </button>
+                </div>
+              </div>
             </>
           )}
         </div>

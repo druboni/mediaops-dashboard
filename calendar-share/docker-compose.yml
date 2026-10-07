@@ -1,0 +1,24 @@
+# Public calendar container. Put this file and a `.env` beside it in a
+# persistent directory (see calendar-share/README.md), not in a temp clone.
+services:
+  calendar-share:
+    image: mediaops-calendar-share:latest
+    container_name: calendar-share
+    # Same host network as MediaOps, so the hop that carries the token is
+    # loopback-only and never touches the LAN. Listens on PORT for your
+    # reverse proxy.
+    network_mode: host
+    env_file: .env          # CALENDAR_TOKEN=...  (chmod 600)
+    environment:
+      - MEDIAOPS_URL=http://127.0.0.1:8990
+      - PORT=8991
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      # Locally built image: without this, Watchtower would try to "update" it
+      # from Docker Hub, where an unrelated image could share the name.
+      - com.centurylinklabs.watchtower.enable=false
+    restart: unless-stopped
