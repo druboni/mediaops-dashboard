@@ -65,6 +65,12 @@ export interface SpeedtestResult {
   isp?: string
 }
 
+export interface PublicCalendarConfig {
+  enabled: boolean
+  /** Server-generated; only ever changed via the regenerate endpoint. */
+  secret: string
+}
+
 export interface Config {
   services: Record<ServiceName, ServiceConfig>
   links?: QuickLink[]
@@ -73,4 +79,5 @@ export interface Config {
   notifications?: NotificationsConfig
   additionalInstances?: Record<ArrInstanceType, ArrInstance[]>
   monitoredServers?: MonitoredServer[]
+  publicCalendar?: PublicCalendarConfig
 }

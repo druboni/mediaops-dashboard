@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import { useTheme, THEMES } from '../store/theme'
 import api from '../services/api'
@@ -59,6 +60,11 @@ export default function Settings() {
   })
   const [monitoredServers, setMonitoredServers] = useState<MonitoredServer[]>([])
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
+  const [shareCalendar, setShareCalendar] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const shareInputRef = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
   const [notifications, setNotifications] = useState<NotificationsConfig>({
     discordWebhookUrl: '', mediaAddedEnabled: false, issueReportedEnabled: false, webhookSecret: '',
     ntfyEnabled: false, ntfyUrl: '',
@@ -91,6 +97,7 @@ export default function Settings() {
     if (config?.notifications) setNotifications(config.notifications)
     if (config?.additionalInstances) setAdditionalInstances(config.additionalInstances)
     if (config?.monitoredServers) setMonitoredServers(config.monitoredServers)
+    if (typeof config?.publicCalendar?.enabled === 'boolean') setShareCalendar(config.publicCalendar.enabled)
   }, [config])
 
   useEffect(() => {
@@ -119,11 +126,51 @@ export default function Settings() {
     }
   }
 
+  const shareUrl = config?.publicCalendar?.secret
+    ? `${window.location.origin}/share/calendar/${config.publicCalendar.secret}`
+    : ''
+
+  // navigator.clipboard only exists on secure origins (https or localhost), and
+  // MediaOps is usually reached over plain http on the LAN — so fall back to
+  // selecting the text, which at least leaves Ctrl+C one keypress away.
+  const copyShareUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2000)
+    } catch {
+      shareInputRef.current?.select()
+      try {
+        if (document.execCommand('copy')) {
+          setShareCopied(true)
+          setTimeout(() => setShareCopied(false), 2000)
+        }
+      } catch { /* selection is left in place for a manual copy */ }
+    }
+  }
+
+  const regenerateShareUrl = async () => {
+    if (!window.confirm('Generate a new link? Anyone using the current link will lose access.')) return
+    setRegenerating(true)
+    try {
+      const res = await api.post<{ publicCalendar: NonNullable<Config['publicCalendar']> }>('/config/public-calendar/regenerate')
+      queryClient.setQueryData<Config>(['config'], (prev) =>
+        prev ? { ...prev, publicCalendar: res.data.publicCalendar } : prev
+      )
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setSaved(false)
     try {
-      await updateConfig({ ...config!, services, links, autoDeleteAfterImport, notifications, additionalInstances, monitoredServers })
+      await updateConfig({
+        ...config!, services, links, autoDeleteAfterImport, notifications, additionalInstances, monitoredServers,
+        // Only `enabled` is honoured server-side; the secret is never taken from here.
+        publicCalendar: { secret: config?.publicCalendar?.secret ?? '', enabled: shareCalendar },
+      })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } finally {
@@ -351,6 +398,64 @@ export default function Settings() {
           <div className="shrink-0 mt-0.5">
             <Toggle enabled={autoDeleteAfterImport} onChange={setAutoDeleteAfterImport} />
           </div>
+        </div>
+      </section>
+
+      {/* Sharing */}
+      <section className="mt-10 pt-8 border-t border-gray-800">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Sharing</h2>
+        <p className="text-xs text-gray-600 mb-4">Let people see what's coming up without giving them the dashboard</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-white font-medium mb-0.5">Public calendar link</p>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                A read-only page showing the Calendar — upcoming episodes and movie releases, nothing else.
+                No sign-in, no sidebar, no way into the rest of MediaOps from it.
+              </p>
+            </div>
+            <div className="shrink-0 mt-0.5">
+              <Toggle enabled={shareCalendar} onChange={setShareCalendar} />
+            </div>
+          </div>
+
+          {shareCalendar && shareUrl && (
+            <>
+              <div className="flex gap-2">
+                <input
+                  ref={shareInputRef}
+                  readOnly
+                  value={shareUrl}
+                  onFocus={(e) => e.target.select()}
+                  className="input flex-1 text-xs font-mono"
+                />
+                <button
+                  onClick={copyShareUrl}
+                  className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                >
+                  {shareCopied ? 'Copied!' : 'Copy'}
+                </button>
+                <button
+                  onClick={regenerateShareUrl}
+                  disabled={regenerating}
+                  className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap disabled:opacity-50"
+                  title="Replace the link — the old one stops working"
+                >
+                  {regenerating ? 'Working…' : 'New link'}
+                </button>
+              </div>
+              {!config?.publicCalendar?.enabled && (
+                <p className="text-xs text-yellow-400">Save Changes to turn this link on.</p>
+              )}
+              <p className="text-xs text-gray-600 leading-relaxed">
+                The link only works for people who can reach this server. To share it beyond your network,
+                expose just <code className="text-gray-400">/share/calendar/</code>,{' '}
+                <code className="text-gray-400">/api/public/calendar/</code> and the page's{' '}
+                <code className="text-gray-400">/assets/</code> through your reverse proxy — not the whole port,
+                since MediaOps has no real login.
+              </p>
+            </>
+          )}
         </div>
       </section>
 

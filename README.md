@@ -107,6 +107,7 @@ Joins Radarr/Sonarr file sizes against Tautulli play history, then groups everyt
 
 ### Calendar
 - Upcoming releases from Sonarr and Radarr in a month-grid calendar view, color-coded by status (downloaded / upcoming / missing)
+- **Shareable read-only link** (optional, off by default) — a standalone page showing just the calendar, with no sign-in, no sidebar, and no way into the rest of MediaOps. Turn it on and copy the link in Settings → Sharing; "New link" replaces it and kills the old one. It only returns titles, dates and download state — never paths, ids or anything that controls Sonarr/Radarr. To share it beyond your network, expose only `/share/calendar/`, `/api/public/calendar/` and `/assets/` through your reverse proxy, not the whole port
 
 ### Search
 - Global search across Sonarr, Radarr, and Overseerr from one box

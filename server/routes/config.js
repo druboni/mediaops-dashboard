@@ -54,6 +54,12 @@ const DEFAULT_CONFIG = {
   // (each needs Glances running in web mode: `glances -w`). Empty by default
   // — no server topology is assumed.
   monitoredServers: [],
+  // Read-only calendar page anyone with the link can open (see
+  // routes/publicCalendar.js). Off by default — sharing is an explicit choice.
+  publicCalendar: {
+    enabled: false,
+    secret: '',
+  },
 }
 
 const INSTANCE_TYPES = ['sonarr', 'radarr', 'lidarr']
@@ -71,16 +77,24 @@ export async function getConfig() {
       notifications: { ...DEFAULT_CONFIG.notifications, ...(saved.notifications ?? {}) },
       services: { ...DEFAULT_CONFIG.services, ...(saved.services ?? {}) },
       additionalInstances: { ...structuredClone(DEFAULT_CONFIG.additionalInstances), ...(saved.additionalInstances ?? {}) },
+      publicCalendar: { ...DEFAULT_CONFIG.publicCalendar, ...(saved.publicCalendar ?? {}) },
     }
   } catch {
     merged = structuredClone(DEFAULT_CONFIG)
   }
 
-  // Self-heal: generate the webhook secret once so the receiver URL is stable and unguessable.
+  // Self-heal: generate the webhook and share secrets once so their URLs are
+  // stable and unguessable from the start.
+  let healed = false
   if (!merged.notifications.webhookSecret) {
     merged.notifications.webhookSecret = randomBytes(16).toString('hex')
-    await saveConfig(merged)
+    healed = true
   }
+  if (!merged.publicCalendar.secret) {
+    merged.publicCalendar.secret = randomBytes(16).toString('hex')
+    healed = true
+  }
+  if (healed) await saveConfig(merged)
 
   // Callers always get plaintext keys — encryption is purely an at-rest concern,
   // handled here and in saveConfig so no other route needs to know about it.
@@ -145,8 +159,23 @@ export default async function configRoutes(fastify) {
       updated.additionalInstances = { ...current.additionalInstances, ...request.body.additionalInstances }
     }
     if (Array.isArray(request.body.monitoredServers)) updated.monitoredServers = request.body.monitoredServers
+    if (typeof request.body.publicCalendar?.enabled === 'boolean') {
+      updated.publicCalendar = { ...current.publicCalendar, enabled: request.body.publicCalendar.enabled }
+    }
     await saveConfig(updated)
     return updated
+  })
+
+  // Rotates the share secret, which kills any link already handed out. The only
+  // way the secret changes — it's never accepted from a client in the PUT above.
+  fastify.post('/public-calendar/regenerate', async () => {
+    const current = await getConfig()
+    const updated = {
+      ...current,
+      publicCalendar: { ...current.publicCalendar, secret: randomBytes(16).toString('hex') },
+    }
+    await saveConfig(updated)
+    return { publicCalendar: updated.publicCalendar }
   })
 
   // Download the full config as a backup file (still encrypted-at-rest —

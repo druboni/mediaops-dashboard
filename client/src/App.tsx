@@ -30,6 +30,7 @@ const Reclaim     = lazy(() => import('./pages/Reclaim'))
 const History     = lazy(() => import('./pages/History'))
 const Stats       = lazy(() => import('./pages/Stats'))
 const PlexLibrary = lazy(() => import('./pages/PlexLibrary'))
+const PublicCalendar = lazy(() => import('./pages/PublicCalendar'))
 
 const queryClient = new QueryClient()
 
@@ -53,6 +54,12 @@ function AppRoutes() {
       <Route
         path="/login"
         element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
+      />
+      {/* Shareable read-only calendar — deliberately outside PrivateRoute and
+          Layout, so it needs no session and shows nothing else of the app. */}
+      <Route
+        path="/share/calendar/:secret"
+        element={<Suspense fallback={<RouteFallback />}><PublicCalendar /></Suspense>}
       />
       <Route
         path="/"
