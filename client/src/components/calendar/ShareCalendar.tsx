@@ -73,7 +73,7 @@ export default function ShareCalendar({ dataUrl, cacheKey }: {
           isLoading={isLoading}
           title="Upcoming Releases"
           headerExtra={
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-gray-800 text-gray-400 uppercase tracking-wider">
+            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-gray-800 text-gray-400 uppercase tracking-wider whitespace-nowrap">
               Read-only
             </span>
           }

@@ -102,6 +102,11 @@ function getMonthGridDays(monthCursor: Date): Date[] {
 
 // ── State ──────────────────────────────────────────────────────────────────
 
+// Below Tailwind's `sm` breakpoint. A seven-column month grid on a phone gives
+// each day ~50px, which can't hold a readable title, so phones start in List.
+const isNarrow = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 639px)').matches
+
 // View, range and month position, plus the date window they imply. Each page
 // calls this itself so it can key its own data query on startStr/endStr.
 export function useCalendarState() {
@@ -109,7 +114,7 @@ export function useCalendarState() {
   // past midnight moves its "today" highlight on the next render.
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const [range, setRange] = useState<CalendarRange>(14)
-  const [view, setView] = useState<ViewMode>('month')
+  const [view, setView] = useState<ViewMode>(() => (isNarrow() ? 'list' : 'month'))
   const [monthCursor, setMonthCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
   const gridDays = useMemo(() => getMonthGridDays(monthCursor), [monthCursor])
 
@@ -128,28 +133,39 @@ export type CalendarState = ReturnType<typeof useCalendarState>
 
 // ── Row components ─────────────────────────────────────────────────────────
 
+// On a phone the badges sit under the title instead of beside it, so the title
+// gets the full row width rather than losing ~40% of it to "Not released yet".
+function StatusBadge({ status }: { status: ItemStatus }) {
+  const s = STATUS_STYLES[status]
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${s.badgeBg} ${s.badgeText}`}>
+      {s.label}
+    </span>
+  )
+}
+
 function EpisodeRow({ item, todayStr }: { item: Extract<CalendarItem, { kind: 'episode' }>; todayStr: string }) {
   const ep = item.data
   const showTitle = ep.series?.title || 'Unknown Series'
   const network = ep.series?.network
-  const s = STATUS_STYLES[getItemStatus(item, todayStr)]
+  const status = getItemStatus(item, todayStr)
   return (
-    <div className="px-4 py-3 flex items-center gap-3">
-      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-sky-900/60 text-sky-300 shrink-0">TV</span>
+    <div className="px-3 sm:px-4 py-3 flex items-center gap-3">
+      <span className="w-11 text-center text-[10px] py-0.5 rounded font-medium bg-sky-900/60 text-sky-300 shrink-0">TV</span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-white truncate">{showTitle}</p>
         <p className="text-xs text-gray-400 truncate">
           S{String(ep.seasonNumber ?? 0).padStart(2, '0')}E{String(ep.episodeNumber ?? 0).padStart(2, '0')}
           {ep.title ? ` · ${ep.title}` : ''}
         </p>
+        <div className="flex items-center gap-2 mt-1.5 sm:hidden">
+          <StatusBadge status={status} />
+          {network && <span className="text-[11px] text-gray-600 truncate">{network}</span>}
+        </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {network && (
-          <span className="text-xs text-gray-600 hidden sm:block">{network}</span>
-        )}
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${s.badgeBg} ${s.badgeText}`}>
-          {s.label}
-        </span>
+      <div className="hidden sm:flex items-center gap-2 shrink-0">
+        {network && <span className="text-xs text-gray-600">{network}</span>}
+        <StatusBadge status={status} />
       </div>
     </div>
   )
@@ -157,25 +173,36 @@ function EpisodeRow({ item, todayStr }: { item: Extract<CalendarItem, { kind: 'e
 
 function MovieRow({ item, todayStr }: { item: Extract<CalendarItem, { kind: 'movie' }>; todayStr: string }) {
   const movie = item.data
-  const s = STATUS_STYLES[getItemStatus(item, todayStr)]
+  const status = getItemStatus(item, todayStr)
+  const releaseBadge = (
+    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-gray-800 text-gray-400 whitespace-nowrap">
+      {item.releaseType}
+    </span>
+  )
   return (
-    <div className="px-4 py-3 flex items-center gap-3">
-      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-indigo-900/60 text-indigo-300 shrink-0">Movie</span>
+    <div className="px-3 sm:px-4 py-3 flex items-center gap-3">
+      <span className="w-11 text-center text-[10px] py-0.5 rounded font-medium bg-indigo-900/60 text-indigo-300 shrink-0">Movie</span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-white truncate">
           {movie.title}{movie.year ? ` (${movie.year})` : ''}
         </p>
+        <div className="flex items-center gap-2 mt-1.5 sm:hidden">
+          <StatusBadge status={status} />
+          {releaseBadge}
+        </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-gray-800 text-gray-400">
-          {item.releaseType}
-        </span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${s.badgeBg} ${s.badgeText}`}>
-          {s.label}
-        </span>
+      <div className="hidden sm:flex items-center gap-2 shrink-0">
+        {releaseBadge}
+        <StatusBadge status={status} />
       </div>
     </div>
   )
+}
+
+function ItemRow({ item, todayStr }: { item: CalendarItem; todayStr: string }) {
+  return item.kind === 'episode'
+    ? <EpisodeRow item={item} todayStr={todayStr} />
+    : <MovieRow item={item} todayStr={todayStr} />
 }
 
 function chipBorderColor(item: CalendarItem, todayStr: string) {
@@ -191,37 +218,85 @@ function chipLabel(item: CalendarItem) {
   return `${item.data.title}${item.data.year ? ` (${item.data.year})` : ''}`
 }
 
-function MonthDayCell({ date, isCurrentMonth, isToday, items, todayStr }: {
+const STATUS_ORDER: ItemStatus[] = ['downloaded', 'upcoming', 'missing']
+
+function MonthDayCell({ date, isCurrentMonth, isToday, isSelected, items, todayStr, onSelect }: {
   date: Date
   isCurrentMonth: boolean
   isToday: boolean
+  isSelected: boolean
   items: CalendarItem[]
   todayStr: string
+  onSelect: () => void
 }) {
+  // Phones get one dot per status present and a count — titles can't fit in a
+  // ~50px column, and listing them made one busy day a screen tall. Tapping
+  // the day shows the titles below the grid instead.
+  const statuses = STATUS_ORDER.filter((st) => items.some((it) => getItemStatus(it, todayStr) === st))
   return (
-    <div className={`border-r border-b border-gray-800 last:border-r-0 p-1.5 min-h-[92px] ${
-      isCurrentMonth ? 'bg-gray-950' : 'bg-gray-950/40'
-    }`}>
-      <div className={`text-xs mb-1 inline-flex items-center justify-center ${
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={isSelected}
+      aria-label={`${date.toDateString()}, ${items.length} release${items.length === 1 ? '' : 's'}`}
+      className={`flex flex-col items-start justify-start w-full text-left border-r border-b border-gray-800 [&:nth-child(7n)]:border-r-0 p-1 sm:p-1.5 min-h-[56px] sm:min-h-[92px] transition-colors ${
+        isSelected ? 'bg-gray-800' : isCurrentMonth ? 'bg-gray-950 hover:bg-gray-900' : 'bg-gray-950/40 hover:bg-gray-900/60'
+      }`}
+    >
+      <span className={`text-xs mb-1 inline-flex items-center justify-center ${
         isToday
           ? 'w-5 h-5 rounded-full bg-blue-600 text-white font-semibold'
           : isCurrentMonth ? 'text-gray-300' : 'text-gray-700'
       }`}>
         {date.getDate()}
-      </div>
-      <div className="space-y-0.5">
+      </span>
+
+      {items.length > 0 && (
+        <span className="flex items-center gap-1 sm:hidden">
+          {statuses.map((st) => <span key={st} className={`w-1.5 h-1.5 rounded-full ${STATUS_STYLES[st].dot}`} />)}
+          <span className={`text-[10px] tabular-nums ${isCurrentMonth ? 'text-gray-400' : 'text-gray-600'}`}>{items.length}</span>
+        </span>
+      )}
+
+      <span className="hidden sm:block space-y-0.5">
         {items.map((item, i) => (
-          <div
+          <span
             key={i}
             title={chipLabel(item)}
-            className={`text-[10px] leading-tight truncate border-l-2 pl-1 ${chipBorderColor(item, todayStr)} ${
+            className={`block text-[10px] leading-tight truncate border-l-2 pl-1 ${chipBorderColor(item, todayStr)} ${
               isCurrentMonth ? 'text-gray-300' : 'text-gray-600'
             }`}
           >
             {chipLabel(item)}
-          </div>
+          </span>
         ))}
-      </div>
+      </span>
+    </button>
+  )
+}
+
+// A segmented control — full width with even buttons on a phone, compact on
+// larger screens.
+function Segmented<T extends string | number>({ options, value, onChange }: {
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (v: T) => void
+}) {
+  return (
+    <div className="flex w-full sm:w-auto rounded-lg border border-gray-700 overflow-hidden text-xs" role="group">
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          onClick={() => onChange(o.value)}
+          aria-pressed={value === o.value}
+          className={`flex-1 sm:flex-none px-3 py-2 sm:py-1.5 transition-colors whitespace-nowrap ${
+            value === o.value ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   )
 }
@@ -238,6 +313,8 @@ export function CalendarBody({ cal, episodes, movies, isLoading, title = 'Calend
   headerExtra?: ReactNode
 }) {
   const { today, todayStr, range, setRange, view, setView, monthCursor, setMonthCursor, gridDays, startStr, endStr } = cal
+  // The day whose releases are listed under the month grid. Starts on today.
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr)
 
   const grouped = useMemo(() => {
     const map = new Map<string, CalendarItem[]>()
@@ -271,73 +348,69 @@ export function CalendarBody({ cal, episodes, movies, isLoading, title = 'Calend
   const groupedMap = useMemo(() => new Map(grouped.map((g) => [g.date, g.items])), [grouped])
   const totalItems = grouped.reduce((n, g) => n + g.items.length, 0)
   const monthLabel = monthCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+  const selectedItems = groupedMap.get(selectedDate) ?? []
+  const selectedInGrid = gridDays.some((d) => toLocalDateStr(d) === selectedDate)
+
+  const goToMonth = (m: Date) => {
+    setMonthCursor(m)
+    // Keep a selection visible: today when it's in that month, else the 1st.
+    const sameMonth = m.getFullYear() === today.getFullYear() && m.getMonth() === today.getMonth()
+    setSelectedDate(sameMonth ? todayStr : toLocalDateStr(m))
+  }
 
   return (
-    <div className={view === 'month' ? 'p-6' : 'p-6 max-w-4xl'}>
+    <div className={view === 'month' ? 'p-4 sm:p-6' : 'p-4 sm:p-6 max-w-4xl'}>
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-white">{title}</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between mb-5 sm:mb-6">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <h1 className="text-xl sm:text-2xl font-bold text-white">{title}</h1>
           {headerExtra}
           {!isLoading && totalItems > 0 && (
-            <span className="text-xs text-gray-600">{totalItems} release{totalItems !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-gray-600 whitespace-nowrap">{totalItems} release{totalItems !== 1 ? 's' : ''}</span>
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          {/* On a phone the view switch comes first, full width; on larger screens it sits last. */}
+          <div className="sm:order-last">
+            <Segmented<ViewMode>
+              options={[{ value: 'month', label: 'Month' }, { value: 'list', label: 'List' }]}
+              value={view}
+              onChange={setView}
+            />
+          </div>
+
           {view === 'month' ? (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setMonthCursor((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-                className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                onClick={() => goToMonth(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))}
+                className="w-9 h-9 sm:w-7 sm:h-7 shrink-0 flex items-center justify-center rounded-md border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
                 aria-label="Previous month"
               >
                 ‹
               </button>
-              <span className="text-sm font-medium text-gray-200 w-36 text-center">{monthLabel}</span>
+              <span className="flex-1 sm:flex-none sm:w-36 text-sm font-medium text-gray-200 text-center whitespace-nowrap">{monthLabel}</span>
               <button
-                onClick={() => setMonthCursor((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-                className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                onClick={() => goToMonth(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))}
+                className="w-9 h-9 sm:w-7 sm:h-7 shrink-0 flex items-center justify-center rounded-md border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
                 aria-label="Next month"
               >
                 ›
               </button>
               <button
-                onClick={() => setMonthCursor(new Date(today.getFullYear(), today.getMonth(), 1))}
-                className="px-2.5 py-1 rounded-md border border-gray-700 text-xs text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                onClick={() => goToMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
+                className="h-9 sm:h-auto px-3 sm:px-2.5 sm:py-1 shrink-0 rounded-md border border-gray-700 text-xs text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
               >
                 Today
               </button>
             </div>
           ) : (
-            <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
-              {([7, 14, 30] as CalendarRange[]).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setRange(r)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    range === r ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {r === 7 ? '1 Week' : r === 14 ? '2 Weeks' : '1 Month'}
-                </button>
-              ))}
-            </div>
+            <Segmented<CalendarRange>
+              options={[{ value: 7, label: '1 Week' }, { value: 14, label: '2 Weeks' }, { value: 30, label: '1 Month' }]}
+              value={range}
+              onChange={setRange}
+            />
           )}
-
-          <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
-            {(['month', 'list'] as ViewMode[]).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`px-3 py-1.5 capitalize transition-colors ${
-                  view === v ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
-                }`}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -346,33 +419,56 @@ export function CalendarBody({ cal, episodes, movies, isLoading, title = 'Calend
       {view === 'month' ? (
         isLoading ? (
           <div className="grid grid-cols-7 gap-px bg-gray-800 border border-gray-800 rounded-lg overflow-hidden">
-            {[...Array(42)].map((_, i) => <div key={i} className="h-[92px] bg-gray-950 animate-pulse" />)}
+            {[...Array(42)].map((_, i) => <div key={i} className="h-[56px] sm:h-[92px] bg-gray-950 animate-pulse" />)}
           </div>
         ) : (
-          <div className="border border-gray-800 rounded-lg overflow-hidden">
-            <div className="grid grid-cols-7 bg-gray-900 border-b border-gray-800">
-              {WEEKDAY_LABELS.map((w) => (
-                <div key={w} className="px-2 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wider text-center">
-                  {w}
+          <>
+            <div className="border border-gray-800 rounded-lg overflow-hidden">
+              <div className="grid grid-cols-7 bg-gray-900 border-b border-gray-800">
+                {WEEKDAY_LABELS.map((w) => (
+                  <div key={w} className="px-1 sm:px-2 py-1.5 text-[10px] sm:text-[11px] font-semibold text-gray-400 uppercase tracking-wider text-center">
+                    {w}
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7">
+                {gridDays.map((date) => {
+                  const dateStr = toLocalDateStr(date)
+                  return (
+                    <MonthDayCell
+                      key={dateStr}
+                      date={date}
+                      isCurrentMonth={date.getMonth() === monthCursor.getMonth()}
+                      isToday={dateStr === todayStr}
+                      isSelected={dateStr === selectedDate}
+                      items={groupedMap.get(dateStr) ?? []}
+                      todayStr={todayStr}
+                      onSelect={() => setSelectedDate(dateStr)}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* The selected day in full — on a phone this is where titles are read. */}
+            {selectedInGrid && (
+              <div className="mt-5">
+                <div className="flex items-baseline gap-2 mb-2">
+                  <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">{dayLabel(selectedDate)}</h2>
+                  <span className="text-xs text-gray-600">
+                    {selectedItems.length} release{selectedItems.length === 1 ? '' : 's'}
+                  </span>
                 </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-7">
-              {gridDays.map((date) => {
-                const dateStr = toLocalDateStr(date)
-                return (
-                  <MonthDayCell
-                    key={dateStr}
-                    date={date}
-                    isCurrentMonth={date.getMonth() === monthCursor.getMonth()}
-                    isToday={dateStr === todayStr}
-                    items={groupedMap.get(dateStr) ?? []}
-                    todayStr={todayStr}
-                  />
-                )
-              })}
-            </div>
-          </div>
+                {selectedItems.length > 0 ? (
+                  <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800/60">
+                    {selectedItems.map((item, i) => <ItemRow key={i} item={item} todayStr={todayStr} />)}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-600 py-2">Nothing scheduled this day.</p>
+                )}
+              </div>
+            )}
+          </>
         )
       ) : isLoading ? (
         <div className="space-y-4">
@@ -393,11 +489,7 @@ export function CalendarBody({ cal, episodes, movies, isLoading, title = 'Calend
                 <span className="text-xs text-gray-600">{date}</span>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800/60">
-                {items.map((item, i) =>
-                  item.kind === 'episode'
-                    ? <EpisodeRow key={i} item={item} todayStr={todayStr} />
-                    : <MovieRow   key={i} item={item} todayStr={todayStr} />
-                )}
+                {items.map((item, i) => <ItemRow key={i} item={item} todayStr={todayStr} />)}
               </div>
             </div>
           ))}
