@@ -3,9 +3,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
 
+// One per NZBGet instance, keyed by its service name — each has its own queue,
+// speed limit and error, and its NZBIDs are only unique within that instance.
+const NZB_CLIENTS = [
+  { key: 'nzbget', label: 'NZBGet', short: 'NZB' },
+  { key: 'nzbgetMusic', label: 'NZBGet (Music)', short: 'NZB Music' },
+] as const
+type NzbClient = typeof NZB_CLIENTS[number]['key']
+type DownloadClient = 'qbittorrent' | NzbClient
+type ArrService = 'sonarr' | 'radarr' | 'lidarr'
+
 interface DownloadItem {
   id: string
-  client: 'qbittorrent' | 'nzbget'
+  client: DownloadClient
   name: string
   category: string
   size: number
@@ -22,7 +32,7 @@ interface DownloadItem {
 interface ImportingItem {
   id: string
   groupIds: string[]   // all underlying queue record ids sharing this download (season packs etc.)
-  service: 'sonarr' | 'radarr'
+  service: ArrService
   mediaTitle: string | null
   title: string
   state: 'importPending' | 'importing' | 'importBlocked'
@@ -37,15 +47,10 @@ interface DownloadsData {
   queue: DownloadItem[]
   completed: DownloadItem[]
   importing: ImportingItem[]
-  arrQueueHashes: string[]   // all download IDs currently tracked by Sonarr/Radarr
-  limits: {
-    qbittorrent: { speedLimitMode: number } | null
-    nzbget: { speedLimit: number } | null
-  }
-  errors: {
-    qbittorrent: string | null
-    nzbget: string | null
-  }
+  arrQueueHashes: string[]   // all download IDs currently tracked by Sonarr/Radarr/Lidarr
+  arrQueueOk: boolean        // false if any arr's queue couldn't be read (hashes incomplete)
+  limits: { qbittorrent: { speedLimitMode: number } | null } & Record<NzbClient, { speedLimit: number } | null>
+  errors: { qbittorrent: string | null } & Record<NzbClient, string | null>
 }
 
 interface ManualImportFile {
@@ -104,12 +109,14 @@ function statusColor(status: string): string {
   return 'text-gray-400'
 }
 
-function ClientBadge({ client }: { client: 'qbittorrent' | 'nzbget' }) {
+function ClientBadge({ client }: { client: DownloadClient }) {
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
-      client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-green-900/60 text-green-300'
+    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 whitespace-nowrap ${
+      client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300'
+        : client === 'nzbgetMusic' ? 'bg-purple-900/60 text-purple-300'
+        : 'bg-green-900/60 text-green-300'
     }`}>
-      {client === 'qbittorrent' ? 'qBit' : 'NZB'}
+      {client === 'qbittorrent' ? 'qBit' : NZB_CLIENTS.find((c) => c.key === client)?.short ?? 'NZB'}
     </span>
   )
 }
@@ -183,14 +190,15 @@ export default function Downloads() {
   const { enabledServices, config } = useConfig()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<'queue' | 'completed'>('queue')
-  const [clientFilter, setClientFilter] = useState<'all' | 'qbittorrent' | 'nzbget'>('all')
+  const [clientFilter, setClientFilter] = useState<'all' | DownloadClient>('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [deleteTarget, setDeleteTarget] = useState<DownloadItem | null>(null)
   const [manualImportItem, setManualImportItem] = useState<ImportingItem | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set())
 
   const hasQbit = enabledServices.includes('qbittorrent')
-  const hasNzb = enabledServices.includes('nzbget')
+  const nzbClients = NZB_CLIENTS.filter((c) => enabledServices.includes(c.key))
+  const hasNzb = nzbClients.length > 0
 
   const { data, isLoading } = useQuery<DownloadsData>({
     queryKey: ['downloads'],
@@ -219,7 +227,7 @@ export default function Downloads() {
   }, []) // stable — reads qbitAction via ref
   useAutoDelete(data?.importing, autoDelete, handleAutoDelete)
 
-  // Sweep seeding qBit torrents that Sonarr/Radarr is no longer tracking.
+  // Sweep seeding qBit torrents that Sonarr/Radarr/Lidarr is no longer tracking.
   // Fires whenever autoDelete is true and data is available.
   // didSweep resets to false when autoDelete turns off, so re-enabling re-sweeps.
   const didSweep = useRef(false)
@@ -228,12 +236,15 @@ export default function Downloads() {
       didSweep.current = false   // reset so re-enabling triggers a fresh sweep
       return
     }
-    if (!data || didSweep.current) return
+    // Never sweep on an incomplete hash list — an arr that timed out would make
+    // every torrent it is still waiting to import look like an orphan.
+    if (!data || didSweep.current || !data.arrQueueOk) return
     didSweep.current = true
-    const arrHashes = new Set(data.arrQueueHashes ?? [])
+    // The arrs report download IDs in upper case, qBittorrent in lower.
+    const arrHashes = new Set((data.arrQueueHashes ?? []).map((h) => h.toLowerCase()))
     const allQbitItems = [...(data.queue ?? []), ...(data.completed ?? [])]
     const seedingOrphans = allQbitItems.filter(
-      (item) => item.client === 'qbittorrent' && item.status === 'seeding' && !arrHashes.has(item.id)
+      (item) => item.client === 'qbittorrent' && item.status === 'seeding' && !arrHashes.has(item.id.toLowerCase())
     )
     for (const item of seedingOrphans) {
       qbitMutateRef.current({ hash: item.id, action: 'delete', deleteFiles: true })
@@ -241,13 +252,13 @@ export default function Downloads() {
   }, [autoDelete, data])
 
   const nzbAction = useMutation({
-    mutationFn: (body: { id: string; action: string }) =>
-      api.post('/downloads/nzbget/action', body),
+    mutationFn: ({ client, ...body }: { client: NzbClient; id: string; action: string }) =>
+      api.post(`/downloads/${client}/action`, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
 
   const clearImport = useMutation({
-    mutationFn: (body: { service: 'sonarr' | 'radarr'; ids: string[] }) =>
+    mutationFn: (body: { service: ArrService; ids: string[] }) =>
       api.post('/downloads/clear-import', body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
@@ -262,7 +273,7 @@ export default function Downloads() {
   })
 
   const submitManualImport = useMutation({
-    mutationFn: (body: { service: 'sonarr' | 'radarr'; files: ManualImportFile[] }) =>
+    mutationFn: (body: { service: ArrService; files: ManualImportFile[] }) =>
       api.post('/downloads/manual-import', body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['downloads'] })
@@ -283,7 +294,8 @@ export default function Downloads() {
   })
 
   const setNzbLimit = useMutation({
-    mutationFn: (limit: number) => api.post('/downloads/nzbget/set-limit', { limit }),
+    mutationFn: ({ client, limit }: { client: NzbClient; limit: number }) =>
+      api.post(`/downloads/${client}/set-limit`, { limit }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
 
@@ -310,21 +322,20 @@ export default function Downloads() {
     if (item.client === 'qbittorrent') {
       qbitAction.mutate({ hash: item.id, action, deleteFiles })
     } else {
-      nzbAction.mutate({ id: item.id, action })
+      nzbAction.mutate({ client: item.client, id: item.id, action })
     }
   }
 
   const isPaused = (item: DownloadItem) => item.status.includes('paused')
 
-  const nzbSpeedLimit = data?.limits.nzbget?.speedLimit ?? 0
   const qbitLimited = (data?.limits.qbittorrent?.speedLimitMode ?? 0) === 1
 
   return (
     <div className="p-6 max-w-6xl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
         <h1 className="text-2xl font-bold text-white">Downloads</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {data?.limits.qbittorrent !== null && data?.limits.qbittorrent !== undefined && (
             <button
               onClick={() => toggleQbitLimit.mutate()}
@@ -339,20 +350,26 @@ export default function Downloads() {
               qBit {qbitLimited ? 'Limited' : 'Full Speed'}
             </button>
           )}
-          {data?.limits.nzbget !== null && data?.limits.nzbget !== undefined && (
-            <button
-              onClick={() => setNzbLimit.mutate(nzbSpeedLimit > 0 ? 0 : 1024)}
-              disabled={setNzbLimit.isPending}
-              title={nzbSpeedLimit > 0 ? `NZBGet limited to ${nzbSpeedLimit} KB/s — click to remove` : 'Click to limit NZBGet to 1 MB/s'}
-              className={`text-xs px-3 py-1.5 rounded border transition-colors ${
-                nzbSpeedLimit > 0
-                  ? 'bg-yellow-900/40 border-yellow-700 text-yellow-300 hover:bg-yellow-900/60'
-                  : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
-              }`}
-            >
-              NZB {nzbSpeedLimit > 0 ? `Limited (${nzbSpeedLimit >= 1024 ? `${Math.round(nzbSpeedLimit / 1024)} MB/s` : `${nzbSpeedLimit} KB/s`})` : 'Full Speed'}
-            </button>
-          )}
+          {NZB_CLIENTS.map(({ key, label, short }) => {
+            const limit = data?.limits[key]
+            if (!limit) return null
+            const nzbSpeedLimit = limit.speedLimit
+            return (
+              <button
+                key={key}
+                onClick={() => setNzbLimit.mutate({ client: key, limit: nzbSpeedLimit > 0 ? 0 : 1024 })}
+                disabled={setNzbLimit.isPending}
+                title={nzbSpeedLimit > 0 ? `${label} limited to ${nzbSpeedLimit} KB/s — click to remove` : `Click to limit ${label} to 1 MB/s`}
+                className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                  nzbSpeedLimit > 0
+                    ? 'bg-yellow-900/40 border-yellow-700 text-yellow-300 hover:bg-yellow-900/60'
+                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
+                }`}
+              >
+                {short} {nzbSpeedLimit > 0 ? `Limited (${nzbSpeedLimit >= 1024 ? `${Math.round(nzbSpeedLimit / 1024)} MB/s` : `${nzbSpeedLimit} KB/s`})` : 'Full Speed'}
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -406,7 +423,7 @@ export default function Downloads() {
                     }
                   }}
                   disabled={clearImport.isPending}
-                  title="Remove all of these from Sonarr/Radarr queue and download client (use if the files already imported but are stuck)"
+                  title="Remove all of these from the Sonarr/Radarr/Lidarr queue and download client (use if the files already imported but are stuck)"
                   className="text-xs px-2 py-0.5 rounded shrink-0 bg-gray-800 hover:bg-red-800 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
                 >
                   Clear All
@@ -431,9 +448,11 @@ export default function Downloads() {
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 mt-0.5 ${
                       item.service === 'sonarr'
                         ? 'bg-blue-900/60 text-blue-300'
+                        : item.service === 'lidarr'
+                        ? 'bg-purple-900/60 text-purple-300'
                         : 'bg-yellow-900/60 text-yellow-300'
                     }`}>
-                      {item.service === 'sonarr' ? 'TV' : 'Movie'}
+                      {item.service === 'sonarr' ? 'TV' : item.service === 'lidarr' ? 'Music' : 'Movie'}
                     </span>
                     <div className="flex-1 min-w-0">
                       {item.mediaTitle && (
@@ -457,7 +476,7 @@ export default function Downloads() {
                     }`}>
                       {item.state === 'importing' ? 'Copying…' : item.state === 'importBlocked' ? 'Blocked' : 'Pending'}
                     </span>
-                    {item.state === 'importBlocked' && (
+                    {item.state === 'importBlocked' && item.service !== 'lidarr' && (
                       <button
                         onClick={() => setManualImportItem(item)}
                         title="Review the file(s) Radarr/Sonarr found and confirm the import"
@@ -469,7 +488,7 @@ export default function Downloads() {
                     <button
                       onClick={() => clearImport.mutate({ service: item.service, ids: item.groupIds })}
                       disabled={clearImport.isPending}
-                      title="Remove from Sonarr/Radarr queue and download client (use if the file already imported but is stuck)"
+                      title="Remove from the Sonarr/Radarr/Lidarr queue and download client (use if the file already imported but is stuck)"
                       className="text-xs px-2 py-0.5 rounded shrink-0 bg-gray-800 hover:bg-red-800 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
                     >
                       Clear
@@ -513,9 +532,9 @@ export default function Downloads() {
 
       {/* Filters + errors */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {hasQbit && hasNzb && (
+        {(hasQbit ? 1 : 0) + nzbClients.length > 1 && (
           <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
-            {(['all', 'qbittorrent', 'nzbget'] as const).map((f) => (
+            {(['all', ...(hasQbit ? ['qbittorrent' as const] : []), ...nzbClients.map((c) => c.key)] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setClientFilter(f)}
@@ -523,7 +542,7 @@ export default function Downloads() {
                   clientFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
                 }`}
               >
-                {f === 'all' ? 'All' : f === 'qbittorrent' ? 'qBit' : 'NZBGet'}
+                {f === 'all' ? 'All' : f === 'qbittorrent' ? 'qBit' : NZB_CLIENTS.find((c) => c.key === f)!.label}
               </button>
             ))}
           </div>
@@ -542,9 +561,9 @@ export default function Downloads() {
         {data?.errors.qbittorrent && (
           <span className="text-xs text-red-400">qBit: {data.errors.qbittorrent}</span>
         )}
-        {data?.errors.nzbget && (
-          <span className="text-xs text-red-400">NZBGet: {data.errors.nzbget}</span>
-        )}
+        {NZB_CLIENTS.map(({ key, label }) => data?.errors[key] && (
+          <span key={key} className="text-xs text-red-400">{label}: {data.errors[key]}</span>
+        ))}
       </div>
 
       {/* Table */}

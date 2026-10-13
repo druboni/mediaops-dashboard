@@ -21,7 +21,7 @@ A self-hosted media operations dashboard that brings Plex, Sonarr, Radarr, Lidar
 - **Health alerts** — Sonarr/Radarr/Lidarr application health warnings, Prowlarr indexer failures, and low-disk-space alerts, dismissible
 
 ### Downloads
-- Unified queue and completed list across qBittorrent and NZBGet
+- Unified queue and completed list across qBittorrent and NZBGet, including an optional second NZBGet instance for music
 - Per-torrent progress bar, speed, ETA, and status
 - Pause / resume / delete (with or without files) directly from the UI
 - Speed limiter toggle for qBittorrent (alt-speed mode) and NZBGet (1 MB/s cap)
@@ -159,6 +159,7 @@ Joins Radarr/Sonarr file sizes against Tautulli play history, then groups everyt
 | Indexers | **Jackett** | Indexer health |
 | Download Clients | **qBittorrent** | Queue, completed, speed control |
 | Download Clients | **NZBGet** | Queue, completed, speed control |
+| Download Clients | **NZBGet (Music)** | A second, separate NZBGet instance (e.g. one dedicated to Lidarr) — same features, shown alongside the first |
 | Utilities | **Huntarr** | Health status |
 | Utilities | **Requestrr** | Health status |
 
@@ -273,7 +274,7 @@ All configuration is stored in `config.json` inside the mapped volume (e.g. `/op
 These use **username:password** in the API Key field (not an API key):
 
 - **qBittorrent** → enter `username:password` (e.g. `admin:password`)
-- **NZBGet** → enter `username:password` (e.g. `nzbget:tegbzn6789`)
+- **NZBGet** / **NZBGet (Music)** → enter `username:password` (e.g. `nzbget:tegbzn6789`)
 
 #### URL format
 

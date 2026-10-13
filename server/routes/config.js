@@ -38,6 +38,7 @@ const DEFAULT_CONFIG = {
     jackett:     { enabled: false, url: '', apiKey: '' },
     qbittorrent: { enabled: false, url: '', apiKey: '' },
     nzbget:      { enabled: false, url: '', apiKey: '' },
+    nzbgetMusic: { enabled: false, url: '', apiKey: '' },
     huntarr:     { enabled: false, url: '', apiKey: '' },
     requestrr:   { enabled: false, url: '', apiKey: '' },
     tautulli:    { enabled: false, url: '', apiKey: '' },

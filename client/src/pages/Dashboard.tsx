@@ -23,6 +23,7 @@ interface DashboardData {
   downloads: {
     qbittorrent: { ok: boolean; dlSpeed: number; upSpeed: number; active: number } | null
     nzbget:      { ok: boolean; dlSpeed: number; active: number } | null
+    nzbgetMusic: { ok: boolean; dlSpeed: number; active: number } | null
   }
   plexStreams: {
     title: string; user: string; player: string; platform: string | null; state: string
@@ -42,7 +43,7 @@ interface DashboardData {
 }
 
 interface QueueItem {
-  id: string; client: 'qbittorrent' | 'nzbget'; name: string
+  id: string; client: 'qbittorrent' | 'nzbget' | 'nzbgetMusic'; name: string
   size: number; downloaded: number; progress: number
   dlSpeed: number; upSpeed: number; eta: number; status: string
 }
@@ -87,7 +88,7 @@ function timeAgo(dateStr: string): string {
 const SERVICE_LABELS: Partial<Record<ServiceName, string>> = {
   plex: 'Plex', sonarr: 'Sonarr', radarr: 'Radarr', lidarr: 'Lidarr',
   bazarr: 'Bazarr', overseerr: 'Overseerr', prowlarr: 'Prowlarr',
-  jackett: 'Jackett', qbittorrent: 'qBittorrent', nzbget: 'NZBGet',
+  jackett: 'Jackett', qbittorrent: 'qBittorrent', nzbget: 'NZBGet', nzbgetMusic: 'NZBGet (Music)',
   huntarr: 'Huntarr', requestrr: 'Requestrr', tautulli: 'Tautulli',
 }
 
@@ -158,11 +159,11 @@ function ActiveDownloads({ data }: { data: DownloadsData | undefined }) {
           const barColor = item.status === 'stalled' ? 'bg-yellow-500' : item.status === 'error' ? 'bg-red-500' : 'bg-blue-500'
           const statusColor = item.status === 'downloading' ? 'text-green-400' : item.status === 'stalled' ? 'text-yellow-400' : item.status === 'error' ? 'text-red-400' : 'text-gray-500'
           return (
-            <div key={item.id} className="px-4 py-3 space-y-1.5">
+            <div key={`${item.client}-${item.id}`} className="px-4 py-3 space-y-1.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded font-medium ${item.client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-orange-900/60 text-orange-300'}`}>
-                    {item.client === 'qbittorrent' ? 'qBit' : 'NZB'}
+                    {item.client === 'qbittorrent' ? 'qBit' : item.client === 'nzbgetMusic' ? 'NZB Music' : 'NZB'}
                   </span>
                   <p className="text-sm text-white truncate">{item.name}</p>
                 </div>
@@ -360,12 +361,13 @@ export default function Dashboard() {
         )}
 
       {/* Download clients overview */}
-      {(data.downloads.qbittorrent || data.downloads.nzbget) && (
+      {(data.downloads.qbittorrent || data.downloads.nzbget || data.downloads.nzbgetMusic) && (
         <section className="mb-8">
           <h2 className="section-label">Downloads</h2>
           <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
             {data.downloads.qbittorrent && <DownloadRow label="qBittorrent" {...data.downloads.qbittorrent} />}
             {data.downloads.nzbget      && <DownloadRow label="NZBGet"      {...data.downloads.nzbget} />}
+            {data.downloads.nzbgetMusic && <DownloadRow label="NZBGet (Music)" {...data.downloads.nzbgetMusic} />}
           </div>
         </section>
       )}
@@ -462,7 +464,7 @@ export default function Dashboard() {
               <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded font-medium ${item.client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-orange-900/60 text-orange-300'}`}>
-                    {item.client === 'qbittorrent' ? 'qBit' : 'NZB'}
+                    {item.client === 'qbittorrent' ? 'qBit' : item.client === 'nzbgetMusic' ? 'NZB Music' : 'NZB'}
                   </span>
                   <p className="text-sm text-white truncate">{item.name}</p>
                 </div>

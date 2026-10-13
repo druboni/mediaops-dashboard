@@ -24,6 +24,7 @@ const SERVICE_META: Record<ServiceName, ServiceMeta> = {
   jackett:     { label: 'Jackett',      category: 'Indexers',         placeholder: 'http://192.168.1.x:9117',  keyLabel: 'API Key' },
   qbittorrent: { label: 'qBittorrent',  category: 'Download Clients', placeholder: 'http://192.168.1.x:8080',  keyLabel: 'Username', splitCreds: true },
   nzbget:      { label: 'NZBGet',       category: 'Download Clients', placeholder: 'http://192.168.1.x:6789',  keyLabel: 'Username', splitCreds: true },
+  nzbgetMusic: { label: 'NZBGet (Music)', category: 'Download Clients', placeholder: 'http://192.168.1.x:6790', keyLabel: 'Username', splitCreds: true },
   huntarr:     { label: 'Huntarr',      category: 'Utilities',        placeholder: 'http://192.168.1.x:9705',  keyLabel: 'API Key' },
   requestrr:   { label: 'Requestrr',    category: 'Utilities',        placeholder: 'http://192.168.1.x:4545',  keyLabel: 'API Key' },
   tautulli:    { label: 'Tautulli',     category: 'Media Server',     placeholder: 'http://192.168.1.x:8181',  keyLabel: 'API Key' },

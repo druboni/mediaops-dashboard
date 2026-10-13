@@ -300,7 +300,7 @@ async function getQbitData(url, userpass) {
   }
 }
 
-async function getNzbgetData(url, userpass) {
+async function getNzbgetData(url, userpass, client) {
   const sep = (userpass || '').indexOf(':')
   const user = sep > -1 ? userpass.slice(0, sep) : 'nzbget'
   const pass = sep > -1 ? userpass.slice(sep + 1) : (userpass || '')
@@ -321,7 +321,7 @@ async function getNzbgetData(url, userpass) {
     ? histRes.data.result
         .filter((h) => h.Status === 'SUCCESS')
         .slice(0, 10)
-        .map((h) => ({ name: h.NZBName, date: new Date(h.HistoryTime * 1000).toISOString(), size: h.FileSizeMB * 1024 * 1024, client: 'nzbget' }))
+        .map((h) => ({ name: h.NZBName, date: new Date(h.HistoryTime * 1000).toISOString(), size: h.FileSizeMB * 1024 * 1024, client }))
     : []
   const queueCount = groupsRes.ok && Array.isArray(groupsRes.data?.result) ? groupsRes.data.result.length : 0
   return {
@@ -341,7 +341,7 @@ export default async function dashboardRoutes(fastify) {
     const on = (name) => svcs[name]?.enabled
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
-    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, huntarr, requestrr, tautulli, plexDisk] =
+    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, nzbgetMusic, huntarr, requestrr, tautulli, plexDisk] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -352,7 +352,8 @@ export default async function dashboardRoutes(fastify) {
         on('jackett')     ? getSimpleHealth(at('jackett').url, `/api/v2.0/indexers?apikey=${at('jackett').key}`) : null,
         on('plex')        ? getPlexData(at('plex').url, at('plex').key)                   : null,
         on('qbittorrent') ? getQbitData(at('qbittorrent').url, at('qbittorrent').key)     : null,
-        on('nzbget')      ? getNzbgetData(at('nzbget').url, at('nzbget').key)             : null,
+        on('nzbget')      ? getNzbgetData(at('nzbget').url, at('nzbget').key, 'nzbget')   : null,
+        on('nzbgetMusic') ? getNzbgetData(at('nzbgetMusic').url, at('nzbgetMusic').key, 'nzbgetMusic') : null,
         on('huntarr')     ? getSimpleHealth(at('huntarr').url, '/api/status', arrH(at('huntarr').key)) : null,
         on('requestrr')   ? getSimpleHealth(at('requestrr').url, '/')                     : null,
         on('tautulli')    ? getTautulliData(at('tautulli').url, at('tautulli').key)       : null,
@@ -369,7 +370,7 @@ export default async function dashboardRoutes(fastify) {
     addHealth('radarr', radarr); addHealth('sonarr', sonarr); addHealth('lidarr', lidarr)
     addHealth('bazarr', bazarr); addHealth('overseerr', overseerr); addHealth('prowlarr', prowlarr)
     addHealth('jackett', jackett); addHealth('plex', plex); addHealth('qbittorrent', qbit)
-    addHealth('nzbget', nzbget); addHealth('huntarr', huntarr); addHealth('requestrr', requestrr)
+    addHealth('nzbget', nzbget); addHealth('nzbgetMusic', nzbgetMusic); addHealth('huntarr', huntarr); addHealth('requestrr', requestrr)
     addHealth('tautulli', tautulli)
 
     addLog('debug', '[dashboard] poll complete', {
@@ -379,6 +380,7 @@ export default async function dashboardRoutes(fastify) {
         sonarr   && `sonarr:${sonarr.seriesCount ?? '?'}shows`,
         qbit     && `qbit:${qbit.activeCount ?? 0}active`,
         nzbget   && `nzbget:${nzbget.activeCount ?? 0}active`,
+        nzbgetMusic && `nzbgetMusic:${nzbgetMusic.activeCount ?? 0}active`,
         plex     && `plex:${plex.activeStreams ?? 0}streams`,
         overseerr && `overseerr:${overseerr.pendingCount ?? 0}pending/${overseerr.openIssueCount ?? 0}issues`,
       ].filter(Boolean).join(' | '),
@@ -393,6 +395,7 @@ export default async function dashboardRoutes(fastify) {
     const recentlyDownloaded = [
       ...(qbit?.recentlyDownloaded || []),
       ...(nzbget?.recentlyDownloaded || []),
+      ...(nzbgetMusic?.recentlyDownloaded || []),
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10)
 
     return {
@@ -411,6 +414,7 @@ export default async function dashboardRoutes(fastify) {
       downloads: {
         qbittorrent: on('qbittorrent') && qbit ? { ok: qbit.health.ok, dlSpeed: qbit.dlSpeed, upSpeed: qbit.upSpeed, active: qbit.activeCount } : null,
         nzbget:      on('nzbget') && nzbget     ? { ok: nzbget.health.ok, dlSpeed: nzbget.dlSpeed, active: nzbget.activeCount }                  : null,
+        nzbgetMusic: on('nzbgetMusic') && nzbgetMusic ? { ok: nzbgetMusic.health.ok, dlSpeed: nzbgetMusic.dlSpeed, active: nzbgetMusic.activeCount } : null,
       },
       plexStreams: plex?.streamDetails || [],
       recentlyAdded,

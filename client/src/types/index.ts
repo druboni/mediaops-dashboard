@@ -9,6 +9,7 @@ export type ServiceName =
   | 'jackett'
   | 'qbittorrent'
   | 'nzbget'
+  | 'nzbgetMusic'
   | 'huntarr'
   | 'requestrr'
   | 'tautulli'

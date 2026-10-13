@@ -56,6 +56,11 @@ async function nzbRpc(url, userpass, method, params = []) {
   return json.result
 }
 
+// Every NZBGet instance, keyed by its name under config.services. Each one is
+// its own daemon with its own queue, so NZBIDs are only unique per instance —
+// items carry their service key as `client` and actions route back by it.
+const NZB_CLIENTS = ['nzbget', 'nzbgetMusic']
+
 const mbToBytes = (mb) => Math.round((mb || 0) * 1024 * 1024)
 
 async function getQbitData(url, password) {
@@ -101,16 +106,25 @@ async function getQbitData(url, password) {
   return { queue, completed, speedLimitMode: parseInt(speedLimitModeText) || 0 }
 }
 
+// Lidarr is still on the v1 API; Sonarr and Radarr are v3.
+const arrApi = (service) => (service === 'lidarr' ? 'v1' : 'v3')
+
 async function getArrQueue(url, apiKey, service) {
   try {
-    const endpoint = service === 'sonarr'
-      ? `${url}/api/v3/queue?pageSize=100&includeSeries=true&includeEpisode=true`
-      : `${url}/api/v3/queue?pageSize=100&includeMovie=true`
+    const include = {
+      sonarr: 'includeSeries=true&includeEpisode=true',
+      radarr: 'includeMovie=true',
+      // No includeAlbum: album objects make a large Lidarr queue several MB per poll.
+      lidarr: 'includeArtist=true',
+    }[service]
+    // The whole queue, not just a first page — allHashes below is what stops the
+    // client's auto-delete sweep removing a torrent that is still waiting on import.
+    const endpoint = `${url}/api/${arrApi(service)}/queue?pageSize=1000&${include}`
     const res = await fetch(endpoint, {
       headers: { 'X-Api-Key': apiKey, Accept: 'application/json' },
       signal: AbortSignal.timeout(8000),
     })
-    if (!res.ok) return { importing: [], allHashes: new Set() }
+    if (!res.ok) return { ok: false, importing: [], allHashes: new Set() }
     const json = await res.json()
     const records = json.records ?? json ?? []
 
@@ -153,6 +167,8 @@ async function getArrQueue(url, apiKey, service) {
           const code = `S${String(r.episode.seasonNumber).padStart(2, '0')}E${String(r.episode.episodeNumber).padStart(2, '0')}`
           title = r.episode.title ? `${code} – ${r.episode.title}` : code
         }
+      } else if (service === 'lidarr') {
+        mediaTitle = r.artist?.artistName || null
       } else {
         mediaTitle = r.movie?.title || r.title || null
         title = mediaTitle || title
@@ -172,13 +188,13 @@ async function getArrQueue(url, apiKey, service) {
       }
     })
 
-    return { importing, allHashes }
+    return { ok: true, importing, allHashes }
   } catch {
-    return { importing: [], allHashes: new Set() }
+    return { ok: false, importing: [], allHashes: new Set() }
   }
 }
 
-async function getNzbData(url, userpass) {
+async function getNzbData(url, userpass, client) {
   const [groups, history, status] = await Promise.all([
     nzbRpc(url, userpass, 'listgroups', [0]),
     nzbRpc(url, userpass, 'history', [false]),
@@ -207,7 +223,7 @@ async function getNzbData(url, userpass) {
     const eta = dlRate > 0 ? Math.round(remainBytes / dlRate) : -1
     return {
       id: String(g.NZBID),
-      client: 'nzbget',
+      client,
       name: g.NZBName,
       category: g.Category || '',
       size: mbToBytes(sizeMB),
@@ -224,7 +240,7 @@ async function getNzbData(url, userpass) {
 
   const completed = (history || []).slice(0, 100).map((h) => ({
     id: String(h.NZBID),
-    client: 'nzbget',
+    client,
     name: h.NZBName,
     category: h.Category || '',
     size: mbToBytes(h.FileSizeMB || 0),
@@ -250,41 +266,50 @@ export default async function downloadsRoutes(fastify) {
     const on = (name) => svcs[name]?.enabled
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
-    const [qbitResult, nzbResult, sonarrQueue, radarrQueue] = await Promise.allSettled([
+    const arrQueue = (name) => on(name)
+      ? getArrQueue(at(name).url, at(name).key, name)
+      : Promise.resolve({ ok: true, importing: [], allHashes: new Set() })
+
+    const [qbitResult, sonarrQueue, radarrQueue, lidarrQueue, ...nzbResults] = await Promise.allSettled([
       on('qbittorrent') ? getQbitData(at('qbittorrent').url, at('qbittorrent').key) : Promise.resolve(null),
-      on('nzbget') ? getNzbData(at('nzbget').url, at('nzbget').key) : Promise.resolve(null),
-      on('sonarr') ? getArrQueue(at('sonarr').url, at('sonarr').key, 'sonarr') : Promise.resolve({ importing: [], allHashes: new Set() }),
-      on('radarr') ? getArrQueue(at('radarr').url, at('radarr').key, 'radarr') : Promise.resolve({ importing: [], allHashes: new Set() }),
+      arrQueue('sonarr'),
+      arrQueue('radarr'),
+      arrQueue('lidarr'),
+      ...NZB_CLIENTS.map((c) => (on(c) ? getNzbData(at(c).url, at(c).key, c) : Promise.resolve(null))),
     ])
 
     const qbit = qbitResult.status === 'fulfilled' ? qbitResult.value : null
-    const nzb = nzbResult.status === 'fulfilled' ? nzbResult.value : null
-    const sonarr = sonarrQueue.status === 'fulfilled' ? sonarrQueue.value : { importing: [], allHashes: new Set() }
-    const radarr = radarrQueue.status === 'fulfilled' ? radarrQueue.value : { importing: [], allHashes: new Set() }
-    const importing = [...sonarr.importing, ...radarr.importing]
-    // Union of all download IDs currently tracked by Sonarr+Radarr (any state).
+    const nzbs = nzbResults.map((r) => (r.status === 'fulfilled' ? r.value : null))
+    const arrs = [sonarrQueue, radarrQueue, lidarrQueue].map((r) =>
+      r.status === 'fulfilled' ? r.value : { ok: false, importing: [], allHashes: new Set() })
+    const importing = arrs.flatMap((a) => a.importing)
+    // Union of all download IDs currently tracked by Sonarr+Radarr+Lidarr (any state).
     // Used by the client to identify seeding torrents that have already been imported.
-    const arrQueueHashes = [...sonarr.allHashes, ...radarr.allHashes]
+    const arrQueueHashes = arrs.flatMap((a) => [...a.allHashes])
+
+    const limits = { qbittorrent: on('qbittorrent') ? { speedLimitMode: qbit?.speedLimitMode ?? 0 } : null }
+    const errors = { qbittorrent: qbitResult.status === 'rejected' ? qbitResult.reason?.message : null }
+    NZB_CLIENTS.forEach((c, i) => {
+      limits[c] = on(c) ? { speedLimit: nzbs[i]?.speedLimit ?? 0 } : null
+      errors[c] = nzbResults[i].status === 'rejected' ? nzbResults[i].reason?.message : null
+    })
 
     return {
       queue: [
         ...(qbit?.queue || []),
-        ...(nzb?.queue || []),
+        ...nzbs.flatMap((n) => n?.queue || []),
       ].sort((a, b) => b.dlSpeed - a.dlSpeed),
       completed: [
         ...(qbit?.completed || []),
-        ...(nzb?.completed || []),
+        ...nzbs.flatMap((n) => n?.completed || []),
       ],
       importing,
       arrQueueHashes,
-      limits: {
-        qbittorrent: on('qbittorrent') ? { speedLimitMode: qbit?.speedLimitMode ?? 0 } : null,
-        nzbget: on('nzbget') ? { speedLimit: nzb?.speedLimit ?? 0 } : null,
-      },
-      errors: {
-        qbittorrent: qbitResult.status === 'rejected' ? qbitResult.reason?.message : null,
-        nzbget: nzbResult.status === 'rejected' ? nzbResult.reason?.message : null,
-      },
+      // False when an enabled arr's queue couldn't be read, i.e. arrQueueHashes
+      // is missing downloads that may still be waiting on import.
+      arrQueueOk: arrs.every((a) => a.ok),
+      limits,
+      errors,
     }
   })
 
@@ -321,10 +346,10 @@ export default async function downloadsRoutes(fastify) {
     }
   })
 
-  fastify.post('/nzbget/action', async (request, reply) => {
+  for (const client of NZB_CLIENTS) fastify.post(`/${client}/action`, async (request, reply) => {
     const config = await getConfig()
-    const svc = config.services.nzbget
-    if (!svc?.enabled) return reply.status(400).send({ error: 'NZBGet not enabled' })
+    const svc = config.services[client]
+    if (!svc?.enabled) return reply.status(400).send({ error: `${client} not enabled` })
 
     const { id, action } = request.body
     if (!id || !action) return reply.status(400).send({ error: 'id and action required' })
@@ -383,7 +408,7 @@ export default async function downloadsRoutes(fastify) {
           blocklist: 'false',
           skipRedownload: 'true',
         })
-        const res = await fetch(`${url}/api/v3/queue/${targetIds[i]}?${params}`, {
+        const res = await fetch(`${url}/api/${arrApi(service)}/queue/${targetIds[i]}?${params}`, {
           method: 'DELETE',
           headers: { 'X-Api-Key': svc.apiKey },
           signal: AbortSignal.timeout(8000),
@@ -481,10 +506,10 @@ export default async function downloadsRoutes(fastify) {
     }
   })
 
-  fastify.post('/nzbget/set-limit', async (request, reply) => {
+  for (const client of NZB_CLIENTS) fastify.post(`/${client}/set-limit`, async (request, reply) => {
     const config = await getConfig()
-    const svc = config.services.nzbget
-    if (!svc?.enabled) return reply.status(400).send({ error: 'NZBGet not enabled' })
+    const svc = config.services[client]
+    if (!svc?.enabled) return reply.status(400).send({ error: `${client} not enabled` })
 
     const { limit } = request.body
     try {

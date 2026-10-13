@@ -2,6 +2,19 @@ import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
 
+function nzbgetTest(url, key) {
+  const sep = (key || '').indexOf(':')
+  const user = sep > -1 ? key.slice(0, sep) : 'nzbget'
+  const pass = sep > -1 ? key.slice(sep + 1) : (key || '')
+  const b64 = Buffer.from(`${user}:${pass}`).toString('base64')
+  return {
+    url: `${url}/jsonrpc`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Basic ${b64}` },
+    body: JSON.stringify({ version: '1.1', method: 'status', params: [] }),
+  }
+}
+
 const TEST_ENDPOINT = {
   sonarr:    (url, key) => ({ url: `${url}/api/v3/system/status`, headers: { 'X-Api-Key': key } }),
   radarr:    (url, key) => ({ url: `${url}/api/v3/system/status`, headers: { 'X-Api-Key': key } }),
@@ -31,18 +44,8 @@ const TEST_ENDPOINT = {
       acceptStatus: [204],    // qBit 5.x success response (204 No Content)
     }
   },
-  nzbget: (url, key) => {
-    const sep = (key || '').indexOf(':')
-    const user = sep > -1 ? key.slice(0, sep) : 'nzbget'
-    const pass = sep > -1 ? key.slice(sep + 1) : (key || '')
-    const b64 = Buffer.from(`${user}:${pass}`).toString('base64')
-    return {
-      url: `${url}/jsonrpc`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Basic ${b64}` },
-      body: JSON.stringify({ version: '1.1', method: 'status', params: [] }),
-    }
-  },
+  nzbget: nzbgetTest,
+  nzbgetMusic: nzbgetTest,
   huntarr:   (url, key) => ({ url: `${url}/api/v1/system/status`, headers: { 'X-Api-Key': key } }),
   requestrr: (url)      => ({ url: `${url}/`,                     headers: {} }),
   tautulli:  (url, key) => ({ url: `${url}/api/v2?apikey=${encodeURIComponent(key)}&cmd=get_server_info`, headers: {} }),

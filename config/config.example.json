@@ -10,6 +10,7 @@
     "jackett":     { "enabled": false, "url": "http://localhost:9117",  "apiKey": "" },
     "qbittorrent": { "enabled": false, "url": "http://localhost:8080",  "apiKey": "" },
     "nzbget":      { "enabled": false, "url": "http://localhost:6789",  "apiKey": "" },
+    "nzbgetMusic": { "enabled": false, "url": "http://localhost:6790",  "apiKey": "" },
     "huntarr":     { "enabled": false, "url": "http://localhost:9705",  "apiKey": "" },
     "requestrr":   { "enabled": false, "url": "http://localhost:4545",  "apiKey": "" }
   }
