@@ -15,7 +15,7 @@ interface DashboardData {
   health: Partial<Record<ServiceName, HealthEntry>>
   stats: {
     movies: number | null; shows: number | null; episodes: number | null
-    artists: number | null; albums: number | null
+    artists: number | null; albums: number | null; tracks?: number | null
     plexStreams: number | null; pendingRequests: number | null
     openIssues: number | null
   }
@@ -311,10 +311,13 @@ export default function Dashboard() {
       {/* Library Stats */}
       <section className="mb-8">
         <h2 className="section-label">Library</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard label="Movies"   value={data.stats.movies} />
           <StatCard label="Shows"    value={data.stats.shows} />
           <StatCard label="Episodes" value={data.stats.episodes} />
+          {data.stats.artists != null && <StatCard label="Artists" value={data.stats.artists} />}
+          {data.stats.albums  != null && <StatCard label="Albums"  value={data.stats.albums} />}
+          {data.stats.tracks  != null && <StatCard label="Tracks"  value={data.stats.tracks} />}
           <StatCard label="Streams"  value={data.stats.plexStreams}      highlight={!!data.stats.plexStreams} />
           <StatCard label="Requests" value={data.stats.pendingRequests}  highlight={!!data.stats.pendingRequests} />
           <StatCard label="Issues"   value={data.stats.openIssues}       highlight={!!data.stats.openIssues} />

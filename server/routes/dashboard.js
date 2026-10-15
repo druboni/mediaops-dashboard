@@ -125,13 +125,18 @@ async function getTautulliData(url, key) {
   const tautulliVersion = infoResult.ok ? (infoResult.data?.response?.data?.tautulli_version?.replace(/^v/, '') ?? null) : null
 
   const libOk = libResult.ok && libResult.data?.response?.result === 'success'
-  let movieCount = null, showCount = null, episodeCount = null, musicCount = null
+  let movieCount = null, showCount = null, episodeCount = null, musicCount = null, albumCount = null, trackCount = null
   if (libOk) {
     for (const lib of libResult.data.response.data?.data ?? []) {
       const n = parseInt(lib.count) || 0
       if (lib.section_type === 'movie')  movieCount  = (movieCount  ?? 0) + n
       if (lib.section_type === 'show')  { showCount   = (showCount   ?? 0) + n; episodeCount = (episodeCount ?? 0) + (parseInt(lib.child_count) || 0) }
-      if (lib.section_type === 'artist') musicCount  = (musicCount  ?? 0) + n
+      // Music sections: count = artists, parent_count = albums, child_count = tracks.
+      if (lib.section_type === 'artist') {
+        musicCount = (musicCount ?? 0) + n
+        albumCount = (albumCount ?? 0) + (parseInt(lib.parent_count) || 0)
+        trackCount = (trackCount ?? 0) + (parseInt(lib.child_count) || 0)
+      }
     }
   }
 
@@ -146,7 +151,7 @@ async function getTautulliData(url, key) {
     }))
   }
 
-  return { health: { ok: libOk, ...(tautulliVersion ? { version: tautulliVersion } : {}) }, movieCount, showCount, episodeCount, musicCount, recentlyPlayed }
+  return { health: { ok: libOk, ...(tautulliVersion ? { version: tautulliVersion } : {}) }, movieCount, showCount, episodeCount, musicCount, albumCount, trackCount, recentlyPlayed }
 }
 
 async function getSimpleHealth(url, path, headers = {}, extractVersion = null) {
@@ -426,7 +431,9 @@ export default async function dashboardRoutes(fastify) {
         shows:           tautulli?.showCount    ?? sonarr?.seriesCount  ?? null,
         episodes:        tautulli?.episodeCount ?? sonarr?.episodeCount ?? null,
         artists:         tautulli?.musicCount   ?? lidarr?.artistCount  ?? null,
-        albums:          lidarr?.albumCount ?? null,
+        // Tautulli counts what's in Plex; Lidarr's album count includes albums it hasn't downloaded.
+        albums:          tautulli?.albumCount   ?? lidarr?.albumCount   ?? null,
+        tracks:          tautulli?.trackCount   ?? null,
         plexStreams:     plex?.activeStreams  ?? null,
         pendingRequests: overseerr?.pendingCount ?? null,
         openIssues:      overseerr?.openIssueCount ?? null,
