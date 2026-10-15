@@ -156,6 +156,16 @@ async function getSimpleHealth(url, path, headers = {}, extractVersion = null) {
   return { health: { ok: true, ...(version ? { version } : {}) } }
 }
 
+// For apps (Listenarr) that answer unknown paths with their web page: a reply
+// that isn't JSON means the URL is wrong, not that the service is healthy.
+async function getJsonHealth(url, path, headers = {}, extractVersion = null) {
+  const r = await safeFetch(`${url}${path}`, { headers })
+  if (!r.ok) return { health: { ok: false, error: r.error } }
+  if (typeof r.data !== 'object' || r.data === null) return { health: { ok: false, error: 'Not an API response — check the URL' } }
+  const version = extractVersion ? extractVersion(r.data) : null
+  return { health: { ok: true, ...(version ? { version } : {}) } }
+}
+
 // 0=other, 1=video, 2=audio, 3=subtitles, 4=not available — matches the labels
 // the Requests page already uses.
 const ISSUE_TYPE = { 0: 'Other', 1: 'Video', 2: 'Audio', 3: 'Subtitles', 4: 'Not Available' }
@@ -262,7 +272,7 @@ async function getPlexData(url, token) {
   }
 }
 
-async function getQbitData(url, userpass) {
+async function getQbitData(url, userpass, client = 'qbittorrent') {
   try {
     let cookie = await getQbitSid(url, userpass)
 
@@ -281,7 +291,7 @@ async function getQbitData(url, userpass) {
     const recentlyDownloaded = Array.isArray(completed)
       ? completed
           .filter((t) => t.completion_on > 0)
-          .map((t) => ({ name: t.name, date: new Date(t.completion_on * 1000).toISOString(), size: t.size, client: 'qbittorrent' }))
+          .map((t) => ({ name: t.name, date: new Date(t.completion_on * 1000).toISOString(), size: t.size, client }))
       : []
     // "active" here means "in the queue", matching the Downloads page's own
     // count — not qBittorrent's filter=active, which only counts torrents
@@ -341,7 +351,8 @@ export default async function dashboardRoutes(fastify) {
     const on = (name) => svcs[name]?.enabled
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
-    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, nzbgetMusic, huntarr, requestrr, tautulli, plexDisk] =
+    const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, nzbgetMusic, huntarr, requestrr, tautulli, plexDisk,
+      qbitMam, listenarr, listenarrMam, audiobookshelf, audiobookRequester] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -358,6 +369,11 @@ export default async function dashboardRoutes(fastify) {
         on('requestrr')   ? getSimpleHealth(at('requestrr').url, '/')                     : null,
         on('tautulli')    ? getTautulliData(at('tautulli').url, at('tautulli').key)       : null,
         getDiskUsage(PLEX_MOUNT_PATH),
+        on('qbittorrentMam') ? getQbitData(at('qbittorrentMam').url, at('qbittorrentMam').key, 'qbittorrentMam') : null,
+        on('listenarr')    ? getJsonHealth(at('listenarr').url, '/api/v1/system/info', arrH(at('listenarr').key), d => d?.version) : null,
+        on('listenarrMam') ? getJsonHealth(at('listenarrMam').url, '/api/v1/system/info', arrH(at('listenarrMam').key), d => d?.version) : null,
+        on('audiobookshelf') ? getJsonHealth(at('audiobookshelf').url, '/status', {}, d => d?.serverVersion) : null,
+        on('audiobookRequester') ? getJsonHealth(at('audiobookRequester').url, '/api/ping', {}, d => d?.version) : null,
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
@@ -372,6 +388,8 @@ export default async function dashboardRoutes(fastify) {
     addHealth('jackett', jackett); addHealth('plex', plex); addHealth('qbittorrent', qbit)
     addHealth('nzbget', nzbget); addHealth('nzbgetMusic', nzbgetMusic); addHealth('huntarr', huntarr); addHealth('requestrr', requestrr)
     addHealth('tautulli', tautulli)
+    addHealth('qbittorrentMam', qbitMam); addHealth('listenarr', listenarr); addHealth('listenarrMam', listenarrMam)
+    addHealth('audiobookshelf', audiobookshelf); addHealth('audiobookRequester', audiobookRequester)
 
     addLog('debug', '[dashboard] poll complete', {
       service: 'dashboard',
@@ -379,6 +397,7 @@ export default async function dashboardRoutes(fastify) {
         radarr   && `radarr:${radarr.movieCount ?? '?'}movies`,
         sonarr   && `sonarr:${sonarr.seriesCount ?? '?'}shows`,
         qbit     && `qbit:${qbit.activeCount ?? 0}active`,
+        qbitMam  && `qbitMam:${qbitMam.activeCount ?? 0}active`,
         nzbget   && `nzbget:${nzbget.activeCount ?? 0}active`,
         nzbgetMusic && `nzbgetMusic:${nzbgetMusic.activeCount ?? 0}active`,
         plex     && `plex:${plex.activeStreams ?? 0}streams`,
@@ -394,6 +413,7 @@ export default async function dashboardRoutes(fastify) {
 
     const recentlyDownloaded = [
       ...(qbit?.recentlyDownloaded || []),
+      ...(qbitMam?.recentlyDownloaded || []),
       ...(nzbget?.recentlyDownloaded || []),
       ...(nzbgetMusic?.recentlyDownloaded || []),
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10)
@@ -413,6 +433,7 @@ export default async function dashboardRoutes(fastify) {
       plexDisk,
       downloads: {
         qbittorrent: on('qbittorrent') && qbit ? { ok: qbit.health.ok, dlSpeed: qbit.dlSpeed, upSpeed: qbit.upSpeed, active: qbit.activeCount } : null,
+        qbittorrentMam: on('qbittorrentMam') && qbitMam ? { ok: qbitMam.health.ok, dlSpeed: qbitMam.dlSpeed, upSpeed: qbitMam.upSpeed, active: qbitMam.activeCount } : null,
         nzbget:      on('nzbget') && nzbget     ? { ok: nzbget.health.ok, dlSpeed: nzbget.dlSpeed, active: nzbget.activeCount }                  : null,
         nzbgetMusic: on('nzbgetMusic') && nzbgetMusic ? { ok: nzbgetMusic.health.ok, dlSpeed: nzbgetMusic.dlSpeed, active: nzbgetMusic.activeCount } : null,
       },

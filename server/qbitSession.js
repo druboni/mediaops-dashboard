@@ -1,10 +1,12 @@
 // Shared qBittorrent session cache — used by both dashboard.js and downloads.js
 // Prevents hammering the login endpoint when multiple routes poll qBit frequently.
+// One session per qBittorrent URL: with two instances (main + MAM) a single
+// shared slot made each one log the other out on every poll.
 //
 // Cookie name changed in qBit 5.x: was "SID", now "QBT_SID_{port}"
 // We capture the full "name=value" pair and send it verbatim in Cookie headers.
 
-let cache = { url: null, cookie: null, expires: 0 }
+const sessions = new Map() // url → { cookie, expires }
 
 export function parseQbitCreds(userpass) {
   const sep = (userpass || '').indexOf(':')
@@ -38,27 +40,27 @@ async function doLogin(url, userpass) {
   // Extract full "Name=Value" from Set-Cookie (works for both SID= and QBT_SID_8080=)
   const cookie = res.headers.get('set-cookie')?.match(/^([^;]+)/)?.[1]
   if (!cookie) throw new Error('No session cookie returned from qBittorrent')
-  cache = { url, cookie, expires: Date.now() + 55 * 60 * 1000 }
+  sessions.set(url, { cookie, expires: Date.now() + 55 * 60 * 1000 })
   return cookie
 }
 
 export async function getQbitCookie(url, userpass) {
-  if (cache.url === url && cache.cookie && Date.now() < cache.expires) {
-    return cache.cookie
-  }
+  const s = sessions.get(url)
+  if (s && Date.now() < s.expires) return s.cookie
   return doLogin(url, userpass)
 }
 
 // Called when a request using the cached cookie gets a 403/Forbidden —
 // clears the stale cookie and logs in fresh.
 export async function refreshQbitCookie(url, userpass) {
-  cache = { url: null, cookie: null, expires: 0 }
+  sessions.delete(url)
   return doLogin(url, userpass)
 }
 
 // Legacy alias — kept so any future callers don't break
 export const getQbitSid = getQbitCookie
 
-export function clearQbitCookie() {
-  cache = { url: null, cookie: null, expires: 0 }
+export function clearQbitCookie(url) {
+  if (url) sessions.delete(url)
+  else sessions.clear()
 }

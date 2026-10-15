@@ -15,6 +15,30 @@ function nzbgetTest(url, key) {
   }
 }
 
+// qBittorrent requires a login POST — plain GET to any endpoint returns 403
+// Origin + Referer headers required to pass qBit's CSRF protection
+function qbittorrentTest(url, key) {
+  const sep = (key || '').indexOf(':')
+  const username = sep > -1 ? key.slice(0, sep) : 'admin'
+  const password = sep > -1 ? key.slice(sep + 1) : (key || '')
+  return {
+    url: `${url}/api/v2/auth/login`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Origin': url,
+      'Referer': `${url}/`,
+    },
+    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+    checkText: 'Ok.',       // qBit 4.x success response
+    acceptStatus: [204],    // qBit 5.x success response (204 No Content)
+  }
+}
+
+// Listenarr answers unknown paths with its web page (HTTP 200), so the test
+// must hit a real API route and insist on JSON back.
+const listenarrTest = (url, key) => ({ url: `${url}/api/v1/system/info`, headers: { 'X-Api-Key': key }, expectJson: true })
+
 const TEST_ENDPOINT = {
   sonarr:    (url, key) => ({ url: `${url}/api/v3/system/status`, headers: { 'X-Api-Key': key } }),
   radarr:    (url, key) => ({ url: `${url}/api/v3/system/status`, headers: { 'X-Api-Key': key } }),
@@ -25,27 +49,17 @@ const TEST_ENDPOINT = {
   plex:      (url, key) => ({ url: `${url}/identity`,             headers: { 'X-Plex-Token': key } }),
   // torznab caps endpoint accepts apikey without requiring a session cookie
   jackett:   (url, key) => ({ url: `${url}/api/v2.0/indexers/all/results/torznab?apikey=${key}&t=caps`, headers: {} }),
-  // qBittorrent requires a login POST — plain GET to any endpoint returns 403
-  // Origin + Referer headers required to pass qBit's CSRF protection
-  qbittorrent: (url, key) => {
-    const sep = (key || '').indexOf(':')
-    const username = sep > -1 ? key.slice(0, sep) : 'admin'
-    const password = sep > -1 ? key.slice(sep + 1) : (key || '')
-    return {
-      url: `${url}/api/v2/auth/login`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Origin': url,
-        'Referer': `${url}/`,
-      },
-      body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-      checkText: 'Ok.',       // qBit 4.x success response
-      acceptStatus: [204],    // qBit 5.x success response (204 No Content)
-    }
-  },
+  qbittorrent: qbittorrentTest,
+  qbittorrentMam: qbittorrentTest,
   nzbget: nzbgetTest,
   nzbgetMusic: nzbgetTest,
+  listenarr: listenarrTest,
+  listenarrMam: listenarrTest,
+  // With an API key, check it against a route that needs one; without, just reachability.
+  audiobookshelf: (url, key) => key
+    ? { url: `${url}/api/libraries`, headers: { Authorization: `Bearer ${key}` }, expectJson: true }
+    : { url: `${url}/status`, headers: {}, expectJson: true },
+  audiobookRequester: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
   huntarr:   (url, key) => ({ url: `${url}/api/v1/system/status`, headers: { 'X-Api-Key': key } }),
   requestrr: (url)      => ({ url: `${url}/`,                     headers: {} }),
   tautulli:  (url, key) => ({ url: `${url}/api/v2?apikey=${encodeURIComponent(key)}&cmd=get_server_info`, headers: {} }),
@@ -95,6 +109,9 @@ export default async function servicesRoutes(fastify) {
           if (text.trim() !== endpoint.checkText) {
             return reply.status(502).send({ ok: false, error: 'Auth failed — check credentials' })
           }
+        } else if (endpoint.expectJson && !/json/i.test(response.headers.get('content-type') || '')) {
+          addLog('error', `[test:${service}] ${response.status} but not JSON — wrong URL or port?`, { service, status: response.status })
+          return reply.status(502).send({ ok: false, error: "Got a web page, not the API — check the URL and port" })
         } else {
           addLog('info', `[test:${service}] ${response.status} OK`, { service, status: response.status })
         }

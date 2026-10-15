@@ -22,6 +22,7 @@ interface DashboardData {
   plexDisk: { total: number; free: number; used: number } | null
   downloads: {
     qbittorrent: { ok: boolean; dlSpeed: number; upSpeed: number; active: number } | null
+    qbittorrentMam?: { ok: boolean; dlSpeed: number; upSpeed: number; active: number } | null
     nzbget:      { ok: boolean; dlSpeed: number; active: number } | null
     nzbgetMusic: { ok: boolean; dlSpeed: number; active: number } | null
   }
@@ -42,8 +43,18 @@ interface DashboardData {
   }[]
 }
 
+type DlClient = 'qbittorrent' | 'qbittorrentMam' | 'nzbget' | 'nzbgetMusic'
+
+// Short badge text + colour for a download's client.
+const CLIENT_BADGE: Record<DlClient, [string, string]> = {
+  qbittorrent: ['qBit', 'bg-blue-900/60 text-blue-300'],
+  qbittorrentMam: ['qBit MAM', 'bg-teal-900/60 text-teal-300'],
+  nzbget: ['NZB', 'bg-orange-900/60 text-orange-300'],
+  nzbgetMusic: ['NZB Music', 'bg-orange-900/60 text-orange-300'],
+}
+
 interface QueueItem {
-  id: string; client: 'qbittorrent' | 'nzbget' | 'nzbgetMusic'; name: string
+  id: string; client: DlClient; name: string
   size: number; downloaded: number; progress: number
   dlSpeed: number; upSpeed: number; eta: number; status: string
 }
@@ -90,6 +101,8 @@ const SERVICE_LABELS: Partial<Record<ServiceName, string>> = {
   bazarr: 'Bazarr', overseerr: 'Overseerr', prowlarr: 'Prowlarr',
   jackett: 'Jackett', qbittorrent: 'qBittorrent', nzbget: 'NZBGet', nzbgetMusic: 'NZBGet (Music)',
   huntarr: 'Huntarr', requestrr: 'Requestrr', tautulli: 'Tautulli',
+  qbittorrentMam: 'qBittorrent (MAM)', listenarr: 'Listenarr', listenarrMam: 'Listenarr (MAM)',
+  audiobookshelf: 'Audiobookshelf', audiobookRequester: 'Audiobook Requester',
 }
 
 // ── Hooks ──────────────────────────────────────────────────────────────
@@ -162,8 +175,8 @@ function ActiveDownloads({ data }: { data: DownloadsData | undefined }) {
             <div key={`${item.client}-${item.id}`} className="px-4 py-3 space-y-1.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded font-medium ${item.client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-orange-900/60 text-orange-300'}`}>
-                    {item.client === 'qbittorrent' ? 'qBit' : item.client === 'nzbgetMusic' ? 'NZB Music' : 'NZB'}
+                  <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded font-medium ${CLIENT_BADGE[item.client]?.[1] ?? CLIENT_BADGE.nzbget[1]}`}>
+                    {CLIENT_BADGE[item.client]?.[0] ?? 'NZB'}
                   </span>
                   <p className="text-sm text-white truncate">{item.name}</p>
                 </div>
@@ -361,11 +374,12 @@ export default function Dashboard() {
         )}
 
       {/* Download clients overview */}
-      {(data.downloads.qbittorrent || data.downloads.nzbget || data.downloads.nzbgetMusic) && (
+      {(data.downloads.qbittorrent || data.downloads.qbittorrentMam || data.downloads.nzbget || data.downloads.nzbgetMusic) && (
         <section className="mb-8">
           <h2 className="section-label">Downloads</h2>
           <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
             {data.downloads.qbittorrent && <DownloadRow label="qBittorrent" {...data.downloads.qbittorrent} />}
+            {data.downloads.qbittorrentMam && <DownloadRow label="qBittorrent (MAM)" {...data.downloads.qbittorrentMam} />}
             {data.downloads.nzbget      && <DownloadRow label="NZBGet"      {...data.downloads.nzbget} />}
             {data.downloads.nzbgetMusic && <DownloadRow label="NZBGet (Music)" {...data.downloads.nzbgetMusic} />}
           </div>
@@ -463,8 +477,8 @@ export default function Dashboard() {
             {data.recentlyDownloaded.map((item, i) => (
               <div key={i} className="px-4 py-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded font-medium ${item.client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300' : 'bg-orange-900/60 text-orange-300'}`}>
-                    {item.client === 'qbittorrent' ? 'qBit' : item.client === 'nzbgetMusic' ? 'NZB Music' : 'NZB'}
+                  <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded font-medium ${CLIENT_BADGE[item.client as DlClient]?.[1] ?? CLIENT_BADGE.nzbget[1]}`}>
+                    {CLIENT_BADGE[item.client as DlClient]?.[0] ?? 'NZB'}
                   </span>
                   <p className="text-sm text-white truncate">{item.name}</p>
                 </div>

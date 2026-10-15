@@ -61,9 +61,14 @@ async function nzbRpc(url, userpass, method, params = []) {
 // items carry their service key as `client` and actions route back by it.
 const NZB_CLIENTS = ['nzbget', 'nzbgetMusic']
 
+// Every qBittorrent instance. 'qbittorrent' is the one Sonarr/Radarr/Lidarr
+// (and the original Listenarr) use; 'qbittorrentMam' is Listenarr-MAM's, whose
+// torrents must keep seeding for MyAnonamouse — the client never auto-deletes from it.
+const QBIT_CLIENTS = ['qbittorrent', 'qbittorrentMam']
+
 const mbToBytes = (mb) => Math.round((mb || 0) * 1024 * 1024)
 
-async function getQbitData(url, password) {
+async function getQbitData(url, password, client) {
   let cookie = await getQbitSid(url, password)
   let headers = { Cookie: cookie }
 
@@ -86,7 +91,7 @@ async function getQbitData(url, password) {
   for (const t of Array.isArray(torrents) ? torrents : []) {
     const item = {
       id: t.hash,
-      client: 'qbittorrent',
+      client,
       name: t.name,
       category: t.category || '',
       size: t.size || 0,
@@ -108,6 +113,28 @@ async function getQbitData(url, password) {
 
 // Lidarr is still on the v1 API; Sonarr and Radarr are v3.
 const arrApi = (service) => (service === 'lidarr' ? 'v1' : 'v3')
+
+// The qBittorrent categories an arr files its downloads under (e.g. 'tv-sonarr').
+// The auto-delete sweep only touches these: anything else in qBittorrent —
+// Listenarr's 'audiobooks', hand-added torrents — isn't the arrs' to clean up,
+// and "not in any arr queue" says nothing about whether it's still needed.
+async function getArrQbitCategories(url, apiKey, service) {
+  try {
+    const res = await fetch(`${url}/api/${arrApi(service)}/downloadclient`, {
+      headers: { 'X-Api-Key': apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return { ok: false, categories: [] }
+    const clients = await res.json()
+    const categories = (Array.isArray(clients) ? clients : [])
+      .filter((c) => c.implementation === 'QBittorrent' && c.enable !== false)
+      .flatMap((c) => (c.fields || []).filter((f) => /^(tv|movie|music)Category$/.test(f.name)).map((f) => f.value))
+      .filter(Boolean)
+    return { ok: true, categories }
+  } catch {
+    return { ok: false, categories: [] }
+  }
+}
 
 async function getArrQueue(url, apiKey, service) {
   try {
@@ -266,29 +293,42 @@ export default async function downloadsRoutes(fastify) {
     const on = (name) => svcs[name]?.enabled
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
+    const ARRS = ['sonarr', 'radarr', 'lidarr']
     const arrQueue = (name) => on(name)
       ? getArrQueue(at(name).url, at(name).key, name)
       : Promise.resolve({ ok: true, importing: [], allHashes: new Set() })
+    const arrCats = (name) => on(name)
+      ? getArrQbitCategories(at(name).url, at(name).key, name)
+      : Promise.resolve({ ok: true, categories: [] })
 
-    const [qbitResult, sonarrQueue, radarrQueue, lidarrQueue, ...nzbResults] = await Promise.allSettled([
-      on('qbittorrent') ? getQbitData(at('qbittorrent').url, at('qbittorrent').key) : Promise.resolve(null),
-      arrQueue('sonarr'),
-      arrQueue('radarr'),
-      arrQueue('lidarr'),
+    const settled = await Promise.allSettled([
+      ...QBIT_CLIENTS.map((c) => (on(c) ? getQbitData(at(c).url, at(c).key, c) : Promise.resolve(null))),
       ...NZB_CLIENTS.map((c) => (on(c) ? getNzbData(at(c).url, at(c).key, c) : Promise.resolve(null))),
+      ...ARRS.map(arrQueue),
+      ...ARRS.map(arrCats),
     ])
+    const take = (n) => settled.splice(0, n)
+    const qbitResults = take(QBIT_CLIENTS.length)
+    const nzbResults = take(NZB_CLIENTS.length)
+    const arrQueueResults = take(ARRS.length)
+    const arrCatResults = take(ARRS.length)
 
-    const qbit = qbitResult.status === 'fulfilled' ? qbitResult.value : null
-    const nzbs = nzbResults.map((r) => (r.status === 'fulfilled' ? r.value : null))
-    const arrs = [sonarrQueue, radarrQueue, lidarrQueue].map((r) =>
-      r.status === 'fulfilled' ? r.value : { ok: false, importing: [], allHashes: new Set() })
+    const value = (r) => (r.status === 'fulfilled' ? r.value : null)
+    const qbits = qbitResults.map(value)
+    const nzbs = nzbResults.map(value)
+    const arrs = arrQueueResults.map((r) => value(r) ?? { ok: false, importing: [], allHashes: new Set() })
+    const cats = arrCatResults.map((r) => value(r) ?? { ok: false, categories: [] })
     const importing = arrs.flatMap((a) => a.importing)
     // Union of all download IDs currently tracked by Sonarr+Radarr+Lidarr (any state).
     // Used by the client to identify seeding torrents that have already been imported.
     const arrQueueHashes = arrs.flatMap((a) => [...a.allHashes])
 
-    const limits = { qbittorrent: on('qbittorrent') ? { speedLimitMode: qbit?.speedLimitMode ?? 0 } : null }
-    const errors = { qbittorrent: qbitResult.status === 'rejected' ? qbitResult.reason?.message : null }
+    const limits = {}
+    const errors = {}
+    QBIT_CLIENTS.forEach((c, i) => {
+      limits[c] = on(c) ? { speedLimitMode: qbits[i]?.speedLimitMode ?? 0 } : null
+      errors[c] = qbitResults[i].status === 'rejected' ? qbitResults[i].reason?.message : null
+    })
     NZB_CLIENTS.forEach((c, i) => {
       limits[c] = on(c) ? { speedLimit: nzbs[i]?.speedLimit ?? 0 } : null
       errors[c] = nzbResults[i].status === 'rejected' ? nzbResults[i].reason?.message : null
@@ -296,27 +336,29 @@ export default async function downloadsRoutes(fastify) {
 
     return {
       queue: [
-        ...(qbit?.queue || []),
+        ...qbits.flatMap((q) => q?.queue || []),
         ...nzbs.flatMap((n) => n?.queue || []),
       ].sort((a, b) => b.dlSpeed - a.dlSpeed),
       completed: [
-        ...(qbit?.completed || []),
+        ...qbits.flatMap((q) => q?.completed || []),
         ...nzbs.flatMap((n) => n?.completed || []),
       ],
       importing,
       arrQueueHashes,
-      // False when an enabled arr's queue couldn't be read, i.e. arrQueueHashes
-      // is missing downloads that may still be waiting on import.
-      arrQueueOk: arrs.every((a) => a.ok),
+      // Categories the arrs use in qBittorrent; the sweep deletes nothing outside them.
+      arrCategories: [...new Set(cats.flatMap((c) => c.categories))],
+      // False when an enabled arr's queue or download-client list couldn't be
+      // read, i.e. the sweep would be working from incomplete information.
+      arrQueueOk: arrs.every((a) => a.ok) && cats.every((c) => c.ok),
       limits,
       errors,
     }
   })
 
-  fastify.post('/qbittorrent/action', async (request, reply) => {
+  for (const client of QBIT_CLIENTS) fastify.post(`/${client}/action`, async (request, reply) => {
     const config = await getConfig()
-    const svc = config.services.qbittorrent
-    if (!svc?.enabled) return reply.status(400).send({ error: 'qBittorrent not enabled' })
+    const svc = config.services[client]
+    if (!svc?.enabled) return reply.status(400).send({ error: `${client} not enabled` })
 
     const { hash, action, deleteFiles = false } = request.body
     if (!hash || !action) return reply.status(400).send({ error: 'hash and action required' })
@@ -367,10 +409,10 @@ export default async function downloadsRoutes(fastify) {
     }
   })
 
-  fastify.post('/qbittorrent/toggle-limit', async (request, reply) => {
+  for (const client of QBIT_CLIENTS) fastify.post(`/${client}/toggle-limit`, async (request, reply) => {
     const config = await getConfig()
-    const svc = config.services.qbittorrent
-    if (!svc?.enabled) return reply.status(400).send({ error: 'qBittorrent not enabled' })
+    const svc = config.services[client]
+    if (!svc?.enabled) return reply.status(400).send({ error: `${client} not enabled` })
 
     try {
       const url = svc.url.replace(/\/$/, '')

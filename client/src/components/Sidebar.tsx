@@ -46,7 +46,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Downloads',
     items: [
-      { label: 'Downloads', path: '/downloads', anyOf: ['qbittorrent', 'nzbget', 'nzbgetMusic'], badges: ['activeDownloads'] },
+      { label: 'Downloads', path: '/downloads', anyOf: ['qbittorrent', 'qbittorrentMam', 'nzbget', 'nzbgetMusic'], badges: ['activeDownloads'] },
     ],
   },
   {
@@ -96,13 +96,14 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
     stats?: { pendingRequests: number | null; openIssues: number | null }
     downloads?: {
       qbittorrent: { active: number } | null
+      qbittorrentMam?: { active: number } | null
       nzbget: { active: number } | null
       nzbgetMusic: { active: number } | null
     }
   }>({
     queryKey: ['dashboard'],
     queryFn: async () => (await api.get('/dashboard')).data,
-    enabled: enabledServices.includes('overseerr') || enabledServices.includes('qbittorrent') || enabledServices.includes('nzbget') || enabledServices.includes('nzbgetMusic'),
+    enabled: (['overseerr', 'qbittorrent', 'qbittorrentMam', 'nzbget', 'nzbgetMusic'] as const).some((s) => enabledServices.includes(s)),
     staleTime: 30_000,
   })
 
@@ -118,7 +119,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const badgeCounts: Record<BadgeKey, number> = {
     activeDownloads: (dashboard?.downloads?.qbittorrent?.active ?? 0) + (dashboard?.downloads?.nzbget?.active ?? 0)
-      + (dashboard?.downloads?.nzbgetMusic?.active ?? 0),
+      + (dashboard?.downloads?.nzbgetMusic?.active ?? 0) + (dashboard?.downloads?.qbittorrentMam?.active ?? 0),
     pendingRequests: dashboard?.stats?.pendingRequests ?? 0,
     openIssues: dashboard?.stats?.openIssues ?? 0,
     failingIndexers: health?.indexerStatus?.length ?? 0,

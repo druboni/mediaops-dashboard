@@ -10,7 +10,16 @@ const NZB_CLIENTS = [
   { key: 'nzbgetMusic', label: 'NZBGet (Music)', short: 'NZB Music' },
 ] as const
 type NzbClient = typeof NZB_CLIENTS[number]['key']
-type DownloadClient = 'qbittorrent' | NzbClient
+// Same for qBittorrent. Only the main instance is ever auto-deleted from: the
+// MAM one holds Listenarr-MAM's torrents, which have to keep seeding.
+const QBIT_CLIENTS = [
+  { key: 'qbittorrent', label: 'qBittorrent', short: 'qBit' },
+  { key: 'qbittorrentMam', label: 'qBittorrent (MAM)', short: 'qBit MAM' },
+] as const
+type QbitClient = typeof QBIT_CLIENTS[number]['key']
+type DownloadClient = QbitClient | NzbClient
+const isQbit = (c: DownloadClient): c is QbitClient => QBIT_CLIENTS.some((q) => q.key === c)
+const clientMeta = (c: DownloadClient) => [...QBIT_CLIENTS, ...NZB_CLIENTS].find((x) => x.key === c)!
 type ArrService = 'sonarr' | 'radarr' | 'lidarr'
 
 interface DownloadItem {
@@ -49,8 +58,9 @@ interface DownloadsData {
   importing: ImportingItem[]
   arrQueueHashes: string[]   // all download IDs currently tracked by Sonarr/Radarr/Lidarr
   arrQueueOk: boolean        // false if any arr's queue couldn't be read (hashes incomplete)
-  limits: { qbittorrent: { speedLimitMode: number } | null } & Record<NzbClient, { speedLimit: number } | null>
-  errors: { qbittorrent: string | null } & Record<NzbClient, string | null>
+  arrCategories: string[]    // qBittorrent categories the arrs use — the sweep touches nothing else
+  limits: Record<QbitClient, { speedLimitMode: number } | null> & Record<NzbClient, { speedLimit: number } | null>
+  errors: Record<DownloadClient, string | null>
 }
 
 interface ManualImportFile {
@@ -113,10 +123,11 @@ function ClientBadge({ client }: { client: DownloadClient }) {
   return (
     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 whitespace-nowrap ${
       client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300'
+        : client === 'qbittorrentMam' ? 'bg-teal-900/60 text-teal-300'
         : client === 'nzbgetMusic' ? 'bg-purple-900/60 text-purple-300'
         : 'bg-green-900/60 text-green-300'
     }`}>
-      {client === 'qbittorrent' ? 'qBit' : NZB_CLIENTS.find((c) => c.key === client)?.short ?? 'NZB'}
+      {clientMeta(client)?.short ?? 'NZB'}
     </span>
   )
 }
@@ -196,7 +207,8 @@ export default function Downloads() {
   const [manualImportItem, setManualImportItem] = useState<ImportingItem | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set())
 
-  const hasQbit = enabledServices.includes('qbittorrent')
+  const qbitClients = QBIT_CLIENTS.filter((c) => enabledServices.includes(c.key))
+  const hasQbit = qbitClients.length > 0
   const nzbClients = NZB_CLIENTS.filter((c) => enabledServices.includes(c.key))
   const hasNzb = nzbClients.length > 0
 
@@ -210,8 +222,8 @@ export default function Downloads() {
   const getImportStart = useImportingTimestamps(data?.importing)
 
   const qbitAction = useMutation({
-    mutationFn: (body: { hash: string; action: string; deleteFiles?: boolean }) =>
-      api.post('/downloads/qbittorrent/action', body),
+    mutationFn: ({ client = 'qbittorrent', ...body }: { client?: QbitClient; hash: string; action: string; deleteFiles?: boolean }) =>
+      api.post(`/downloads/${client}/action`, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
 
@@ -222,8 +234,9 @@ export default function Downloads() {
   const qbitMutateRef = useRef(qbitAction.mutate)
   qbitMutateRef.current = qbitAction.mutate
 
+  // Imports finishing only ever free up the main qBittorrent's torrents (the arrs' client).
   const handleAutoDelete = useCallback((hash: string) => {
-    qbitMutateRef.current({ hash, action: 'delete', deleteFiles: true })
+    qbitMutateRef.current({ client: 'qbittorrent', hash, action: 'delete', deleteFiles: true })
   }, []) // stable — reads qbitAction via ref
   useAutoDelete(data?.importing, autoDelete, handleAutoDelete)
 
@@ -242,12 +255,16 @@ export default function Downloads() {
     didSweep.current = true
     // The arrs report download IDs in upper case, qBittorrent in lower.
     const arrHashes = new Set((data.arrQueueHashes ?? []).map((h) => h.toLowerCase()))
+    // Only torrents in a category an arr files under: Listenarr's 'audiobooks'
+    // and anything added by hand aren't in any arr queue, but aren't orphans either.
+    const arrCategories = new Set(data.arrCategories ?? [])
     const allQbitItems = [...(data.queue ?? []), ...(data.completed ?? [])]
     const seedingOrphans = allQbitItems.filter(
-      (item) => item.client === 'qbittorrent' && item.status === 'seeding' && !arrHashes.has(item.id.toLowerCase())
+      (item) => item.client === 'qbittorrent' && item.status === 'seeding'
+        && arrCategories.has(item.category) && !arrHashes.has(item.id.toLowerCase())
     )
     for (const item of seedingOrphans) {
-      qbitMutateRef.current({ hash: item.id, action: 'delete', deleteFiles: true })
+      qbitMutateRef.current({ client: 'qbittorrent', hash: item.id, action: 'delete', deleteFiles: true })
     }
   }, [autoDelete, data])
 
@@ -289,7 +306,7 @@ export default function Downloads() {
   }, [manualImportFiles])
 
   const toggleQbitLimit = useMutation({
-    mutationFn: () => api.post('/downloads/qbittorrent/toggle-limit'),
+    mutationFn: (client: QbitClient) => api.post(`/downloads/${client}/toggle-limit`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
 
@@ -319,8 +336,8 @@ export default function Downloads() {
   })
 
   const handleAction = (item: DownloadItem, action: 'pause' | 'resume' | 'delete', deleteFiles = false) => {
-    if (item.client === 'qbittorrent') {
-      qbitAction.mutate({ hash: item.id, action, deleteFiles })
+    if (isQbit(item.client)) {
+      qbitAction.mutate({ client: item.client, hash: item.id, action, deleteFiles })
     } else {
       nzbAction.mutate({ client: item.client, id: item.id, action })
     }
@@ -328,28 +345,32 @@ export default function Downloads() {
 
   const isPaused = (item: DownloadItem) => item.status.includes('paused')
 
-  const qbitLimited = (data?.limits.qbittorrent?.speedLimitMode ?? 0) === 1
-
   return (
     <div className="p-6 max-w-6xl">
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
         <h1 className="text-2xl font-bold text-white">Downloads</h1>
         <div className="flex items-center gap-2 flex-wrap">
-          {data?.limits.qbittorrent !== null && data?.limits.qbittorrent !== undefined && (
-            <button
-              onClick={() => toggleQbitLimit.mutate()}
-              disabled={toggleQbitLimit.isPending}
-              title={qbitLimited ? 'Alt speed ON — click to remove limit' : 'Click to enable alt speed limit'}
-              className={`text-xs px-3 py-1.5 rounded border transition-colors ${
-                qbitLimited
-                  ? 'bg-yellow-900/40 border-yellow-700 text-yellow-300 hover:bg-yellow-900/60'
-                  : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
-              }`}
-            >
-              qBit {qbitLimited ? 'Limited' : 'Full Speed'}
-            </button>
-          )}
+          {QBIT_CLIENTS.map(({ key, label, short }) => {
+            const limit = data?.limits[key]
+            if (!limit) return null
+            const limited = limit.speedLimitMode === 1
+            return (
+              <button
+                key={key}
+                onClick={() => toggleQbitLimit.mutate(key)}
+                disabled={toggleQbitLimit.isPending}
+                title={limited ? `${label}: alt speed ON — click to remove limit` : `Click to enable ${label}'s alt speed limit`}
+                className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                  limited
+                    ? 'bg-yellow-900/40 border-yellow-700 text-yellow-300 hover:bg-yellow-900/60'
+                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
+                }`}
+              >
+                {short} {limited ? 'Limited' : 'Full Speed'}
+              </button>
+            )
+          })}
           {NZB_CLIENTS.map(({ key, label, short }) => {
             const limit = data?.limits[key]
             if (!limit) return null
@@ -532,9 +553,9 @@ export default function Downloads() {
 
       {/* Filters + errors */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {(hasQbit ? 1 : 0) + nzbClients.length > 1 && (
+        {qbitClients.length + nzbClients.length > 1 && (
           <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
-            {(['all', ...(hasQbit ? ['qbittorrent' as const] : []), ...nzbClients.map((c) => c.key)] as const).map((f) => (
+            {(['all', ...qbitClients.map((c) => c.key), ...nzbClients.map((c) => c.key)] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setClientFilter(f)}
@@ -542,7 +563,7 @@ export default function Downloads() {
                   clientFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
                 }`}
               >
-                {f === 'all' ? 'All' : f === 'qbittorrent' ? 'qBit' : NZB_CLIENTS.find((c) => c.key === f)!.label}
+                {f === 'all' ? 'All' : isQbit(f) ? clientMeta(f).short : clientMeta(f).label}
               </button>
             ))}
           </div>
@@ -558,10 +579,7 @@ export default function Downloads() {
             ))}
           </select>
         )}
-        {data?.errors.qbittorrent && (
-          <span className="text-xs text-red-400">qBit: {data.errors.qbittorrent}</span>
-        )}
-        {NZB_CLIENTS.map(({ key, label }) => data?.errors[key] && (
+        {[...QBIT_CLIENTS, ...NZB_CLIENTS].map(({ key, label }) => data?.errors[key] && (
           <span key={key} className="text-xs text-red-400">{label}: {data.errors[key]}</span>
         ))}
       </div>

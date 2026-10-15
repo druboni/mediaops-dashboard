@@ -160,6 +160,10 @@ Joins Radarr/Sonarr file sizes against Tautulli play history, then groups everyt
 | Download Clients | **qBittorrent** | Queue, completed, speed control |
 | Download Clients | **NZBGet** | Queue, completed, speed control |
 | Download Clients | **NZBGet (Music)** | A second, separate NZBGet instance (e.g. one dedicated to Lidarr) — same features, shown alongside the first |
+| Download Clients | **qBittorrent (MAM)** | A second qBittorrent (e.g. Listenarr-MAM's) — same features, shown alongside the first, and **never** auto-deleted from, so private-tracker torrents keep seeding |
+| Audiobooks | **Listenarr** / **Listenarr (MAM)** | Health status |
+| Audiobooks | **Audiobookshelf** | Health status (API key optional; used only to test it) |
+| Audiobooks | **Audiobook Requester** | Health status (no key needed) |
 | Utilities | **Huntarr** | Health status |
 | Utilities | **Requestrr** | Health status |
 
@@ -267,13 +271,15 @@ All configuration is stored in `config.json` inside the mapped volume (e.g. `/op
 | Tautulli | Settings → Web Interface → API Key |
 | Jackett | Dashboard → API Key (top right) |
 | Huntarr | Settings → General → API Key |
+| Listenarr | Settings → General → API Key (or `ApiKey` in its `config/config.json`) |
+| Audiobookshelf | Settings → API Keys |
 | Plex | Visit `https://plex.tv/claim` or find the token in a Plex request URL |
 
 #### qBittorrent and NZBGet
 
 These use **username:password** in the API Key field (not an API key):
 
-- **qBittorrent** → enter `username:password` (e.g. `admin:password`)
+- **qBittorrent** / **qBittorrent (MAM)** → enter `username:password` (e.g. `admin:password`)
 - **NZBGet** / **NZBGet (Music)** → enter `username:password` (e.g. `nzbget:tegbzn6789`)
 
 #### URL format
