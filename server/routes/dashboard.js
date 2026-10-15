@@ -299,7 +299,8 @@ async function getQbitData(url, userpass, client = 'qbittorrent') {
     const COMPLETED_STATES = ['uploading', 'forcedUP', 'stalledUP', 'queuedUP', 'pausedUP', 'checkingUP']
     const queueCount = Array.isArray(all) ? all.filter((t) => !COMPLETED_STATES.includes(t.state)).length : 0
     return {
-      health: { ok: true, ...(versionText ? { version: versionText.trim() } : {}) },
+      // qBittorrent reports "v5.2.4"; the UI adds its own "v".
+      health: { ok: true, ...(versionText ? { version: versionText.trim().replace(/^v/i, '') } : {}) },
       dlSpeed: info.dl_info_speed || 0,
       upSpeed: info.up_info_speed || 0,
       activeCount: queueCount,
