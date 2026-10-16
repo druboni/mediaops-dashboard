@@ -260,12 +260,12 @@ const lensSort = (l: Lens): SortKey => (l === 'recommended' ? 'score' : 'size')
 // wherever a null happens to sort, they're pinned to the "never" end regardless
 // of direction — descending still means "most recently played first", it's just
 // that "never" is the natural end of that ordering, not an arbitrary null slot.
-function compareCandidates(a: Candidate, b: Candidate, key: SortKey, dir: SortDir): number {
+function compareCandidates(a: Candidate, b: Candidate, key: SortKey, dir: SortDir, lens: Lens): number {
   const sign = dir === 'asc' ? 1 : -1
 
   if (key === 'title') return sign * a.title.localeCompare(b.title)
   if (key === 'instance') return sign * a.instance.localeCompare(b.instance)
-  if (key === 'size') return sign * (a.size - b.size)
+  if (key === 'size') return sign * (freed(a, lens) - freed(b, lens))
   if (key === 'score') return sign * ((a.score ?? 0) - (b.score ?? 0))
 
   const field = key === 'lastPlayed' ? 'lastPlayed' : 'added'
@@ -342,7 +342,7 @@ export default function Reclaim() {
     () =>
       (data?.candidates ?? [])
         .filter((c) => c.lenses.includes(lens))
-        .sort((a, b) => compareCandidates(a, b, sortKey, sortDir)),
+        .sort((a, b) => compareCandidates(a, b, sortKey, sortDir, lens)),
     [data, lens, sortKey, sortDir]
   )
 
