@@ -119,6 +119,31 @@ async function getQbitData(url, password, client) {
 // Lidarr is still on the v1 API; Sonarr and Radarr are v3.
 const arrApi = (service) => (service === 'lidarr' ? 'v1' : 'v3')
 
+const HASH = /^[0-9a-f]{40}$/i
+
+// The release name the *arr grabbed, from its history. Release names never
+// change, so each one is looked up once and remembered.
+const releaseNames = new Map() // hash → name
+async function releaseName({ title, service, url, apiKey, downloadId }) {
+  if (title) return title
+  const hash = downloadId.toLowerCase()
+  if (releaseNames.has(hash)) return releaseNames.get(hash)
+  try {
+    const res = await fetch(`${url}/api/${arrApi(service)}/history?page=1&pageSize=5&downloadId=${encodeURIComponent(downloadId)}`, {
+      headers: { 'X-Api-Key': apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const name = (json.records ?? []).map((r) => r.sourceTitle).find((t) => t && !HASH.test(t)) ?? null
+    if (name) releaseNames.set(hash, name)
+    if (releaseNames.size > 2000) releaseNames.delete(releaseNames.keys().next().value)
+    return name
+  } catch {
+    return null
+  }
+}
+
 // The qBittorrent categories an arr files its downloads under (e.g. 'tv-sonarr').
 // The auto-delete sweep only touches these: anything else in qBittorrent —
 // Listenarr's 'audiobooks', hand-added torrents — isn't the arrs' to clean up,
@@ -165,9 +190,10 @@ async function getArrQueue(url, apiKey, service) {
     const allHashes = new Set(records.map((r) => r.downloadId).filter(Boolean))
 
     // Release titles by hash: a magnet that hasn't fetched its metadata yet is
-    // named only by its hash in qBittorrent, but the *arr knows what it is.
+    // named only by its hash in qBittorrent, and the *arr's queue copies that
+    // name, so the queue title is only kept when it's a real one.
     const titles = {}
-    for (const r of records) if (r.downloadId && r.title) titles[String(r.downloadId).toLowerCase()] = r.title
+    for (const r of records) if (r.downloadId) titles[String(r.downloadId).toLowerCase()] = { title: HASH.test(r.title || '') ? null : r.title, service, url, apiKey, downloadId: r.downloadId }
 
     const blockedRecords = records.filter((r) => {
       const state = r.trackedDownloadState
@@ -333,11 +359,11 @@ export default async function downloadsRoutes(fastify) {
     // Used by the client to identify seeding torrents that have already been imported.
     const arrQueueHashes = arrs.flatMap((a) => [...a.allHashes])
     const arrTitles = Object.assign({}, ...arrs.map((a) => a.titles || {}))
-    for (const q of qbits) {
-      for (const item of q?.queue || []) {
-        if (/^[0-9a-f]{40}$/i.test(item.name) && arrTitles[item.name.toLowerCase()]) item.name = arrTitles[item.name.toLowerCase()]
-      }
-    }
+    const unnamed = qbits.flatMap((q) => q?.queue || []).filter((item) => HASH.test(item.name) && arrTitles[item.name.toLowerCase()])
+    await Promise.all(unnamed.map(async (item) => {
+      const name = await releaseName(arrTitles[item.name.toLowerCase()])
+      if (name) item.name = name
+    }))
 
     const limits = {}
     const errors = {}
