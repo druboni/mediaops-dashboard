@@ -1,5 +1,6 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
+import { watchHistory, overseerrRequests, requestInfo, keepTagId, regret, scoreFor, explain, seasonCandidates, downgradeCandidate, performAction } from '../reclaimSmart.js'
 
 // One title, every service that knows something about it.
 //
@@ -601,9 +602,9 @@ export default async function mediaRoutes(fastify) {
     const staleMonths = intParam(request.query.staleMonths, 12, 1)
     const limit = Math.min(intParam(request.query.limit, 400, 1), 1000)
 
-    const { tautulli, plex } = config.services
+    const { tautulli, plex, overseerr } = config.services
 
-    const [arrResults, guidResult, tautulliResult] = await Promise.all([
+    const [arrResults, guidResult, tautulliResult, historyResult, requestsResult, keepResults, profileResults] = await Promise.all([
       Promise.allSettled(
         targets.map((t) =>
           safeFetch(
@@ -617,10 +618,20 @@ export default async function mediaRoutes(fastify) {
       // cached one that could be up to ten minutes stale.
       plex?.enabled ? plexGuidIndex(plex, { force: true }).catch(() => null) : Promise.resolve(null),
       tautulli?.enabled ? tautulliLibraryIndex(tautulli).catch(() => null) : Promise.resolve(null),
+      // Full play history: per-season watching and who watched what.
+      tautulli?.enabled ? watchHistory(tautulli).catch(() => null) : Promise.resolve(null),
+      // Who asked for each title, to tell "requested and abandoned" from "requested last week".
+      overseerr?.enabled ? overseerrRequests(overseerr).catch(() => null) : Promise.resolve(null),
+      Promise.all(targets.map((t) => keepTagId(t.svc).catch(() => null))),
+      // Quality profiles a movie can be downgraded to.
+      Promise.all(targets.map((t) => (t.kind === 'movie'
+        ? safeFetch(`${trim(t.svc.url)}/api/v3/qualityprofile`, { headers: arrH(t.svc.apiKey) }).then((r) => (r.ok ? r.data : []))
+        : Promise.resolve([])))),
     ])
 
     const guidIndex = guidResult
     const tautulliIndex = tautulliResult
+    const history = historyResult
     const watchIndex = guidIndex || tautulliIndex ? { guidIndex, tautulli: tautulliIndex } : null
     const now = Date.now()
     const neverPlayedBefore = now - neverPlayedDays * MS_PER_DAY
@@ -628,11 +639,14 @@ export default async function mediaRoutes(fastify) {
 
     const items = []
     const reachable = []
+    let kept = 0
+    let keptBytes = 0
 
     targets.forEach((t, i) => {
       const res = settled(arrResults[i])
       if (!res?.ok || !Array.isArray(res.data)) return
       reachable.push(t.name)
+      const keepId = keepResults[i]
 
       for (const raw of res.data) {
         const isMovie = t.kind === 'movie'
@@ -641,16 +655,23 @@ export default async function mediaRoutes(fastify) {
 
         // Nothing on disk means nothing to reclaim.
         if (!hasFile || size <= 0) continue
+        // Tagged "keep" in Radarr/Sonarr: never suggested.
+        if (keepId != null && (raw.tags || []).includes(keepId)) { kept += 1; keptBytes += size; continue }
 
         const watch = watchIndex ? lookupWatch(watchIndex, t.kind, raw) : undefined
         const added = raw.added ? new Date(raw.added).getTime() : null
+        const ratingKey = resolveRatingKey(guidIndex, t.kind, raw) ?? watch?.ratingKey ?? null
+        const hist = ratingKey && history ? (isMovie ? history.movies.get(ratingKey) : history.shows.get(ratingKey)) : null
+        const req = requestInfo(requestsResult, t.kind, raw, hist?.users)
 
         items.push({
           key: `${t.proxyBase}:${raw.id}`,
+          unit: isMovie ? 'movie' : 'series',
           kind: t.kind,
           arrId: raw.id,
           proxyBase: t.proxyBase,
           instance: t.name,
+          targetIndex: i,
           title: raw.title,
           year: raw.year ?? null,
           tmdbId: raw.tmdbId ?? null,
@@ -661,10 +682,17 @@ export default async function mediaRoutes(fastify) {
           quality: isMovie ? raw.movieFile?.quality?.quality?.name ?? null : null,
           ended: isMovie ? null : !!raw.ended,
           episodeFileCount: isMovie ? null : raw.statistics?.episodeFileCount ?? null,
-          playCount: watch?.inPlex ? watch.playCount ?? 0 : null,
-          lastPlayed: watch?.lastPlayed ? new Date(watch.lastPlayed).toISOString() : null,
-          lastPlayedMs: watch?.lastPlayed ?? null,
+          playCount: watch?.inPlex ? Math.max(watch.playCount ?? 0, hist?.plays ?? 0) : null,
+          lastPlayed: watch?.lastPlayed || hist?.last ? new Date(Math.max(watch?.lastPlayed || 0, hist?.last || 0)).toISOString() : null,
+          lastPlayedMs: Math.max(watch?.lastPlayed || 0, hist?.last || 0) || null,
           inPlex: watch ? watch.inPlex : null,
+          viewers: hist?.users.size ?? 0,
+          requestedBy: req?.requestedBy ?? null,
+          requesterWatched: req?.requesterWatched ?? null,
+          requestedAtMs: req?.lastRequested ?? null,
+          mediaId: req?.mediaId ?? null,
+          raw: isMovie ? { runtime: raw.runtime, movieFile: raw.movieFile ? { id: raw.movieFile.id } : null } : raw,
+          showHist: !isMovie ? hist : null,
           lenses: [],
         })
       }
@@ -705,18 +733,71 @@ export default async function mediaRoutes(fastify) {
       }
     }
 
-    // Largest: the top slice by size, regardless of watch state.
+    // Season-level units for shows people have watched part of. A show that
+    // qualifies as a whole (never played, or nothing played for ages) is
+    // suggested as a whole instead, so nothing is counted twice.
+    const seasonItems = []
+    for (const item of items) {
+      if (item.unit !== 'series' || item.lenses.includes('never-played') || item.lenses.includes('stale') || item.inPlex !== true) continue
+      for (const s of seasonCandidates(item.raw, item.showHist, { now, staleBefore, neverPlayedBefore })) {
+        seasonItems.push({
+          ...item,
+          key: `${item.key}:s${s.seasonNumber}`,
+          unit: 'season',
+          seasonNumber: s.seasonNumber,
+          seasonLabel: s.label,
+          size: s.size,
+          episodeFileCount: s.episodeFileCount,
+          monitored: s.monitored,
+          playCount: s.playCount,
+          lastPlayedMs: s.lastPlayedMs,
+          lastPlayed: s.lastPlayedMs ? new Date(s.lastPlayedMs).toISOString() : null,
+          viewers: s.viewers,
+          reasonSeason: s.reasonSeason,
+          note: undefined,
+          lenses: ['seasons'],
+        })
+      }
+    }
+    items.push(...seasonItems)
+
+    // Downgrade: big 4K/remux movies watched rarely — keep them, smaller.
+    for (const item of items) {
+      if (item.unit !== 'movie' || item.inPlex === false) continue
+      const d = downgradeCandidate(item, item.raw, now)
+      if (d) { item.downgrade = d; item.lenses.push('downgrade') }
+    }
+
+    // Recommended: everything that's a sensible delete, ranked by space freed
+    // weighted against how much it would be missed.
+    for (const item of items) {
+      if (!['never-played', 'stale', 'seasons'].some((l) => item.lenses.includes(l))) continue
+      item.regret = regret({
+        plays: item.playCount, last: item.lastPlayedMs, viewers: item.viewers,
+        requestedAt: item.requestedAtMs, requesterWatched: item.requesterWatched,
+      }, now)
+      item.score = scoreFor(item.size, item.regret)
+      item.lenses.push('recommended')
+    }
+    for (const item of items) item.why = explain(item, now)
+
+    // Largest: the top slice by size, regardless of watch state. Whole titles only.
     const bySize = [...items].sort((a, b) => b.size - a.size)
-    for (const item of bySize.slice(0, 50)) item.lenses.push('largest')
+    for (const item of bySize.filter((i) => i.unit !== 'season').slice(0, 50)) item.lenses.push('largest')
 
     // Cap per lens rather than globally. A single global cut ordered by size
     // silently drops the tail of a small lens — a 6-item orphan list showing 5
     // rows while its tab still said 6 — because large items from other lenses
     // fill the budget first.
-    const LENSES = ['never-played', 'stale', 'largest', 'duplicates', 'orphans']
+    const LENSES = ['recommended', 'seasons', 'never-played', 'stale', 'downgrade', 'largest', 'duplicates', 'orphans']
+    const rank = {
+      recommended: (a, b) => b.score - a.score,
+      downgrade: (a, b) => b.downgrade.saving - a.downgrade.saving,
+    }
     const selected = new Map()
     for (const lens of LENSES) {
-      for (const item of bySize.filter((i) => i.lenses.includes(lens)).slice(0, limit)) {
+      const order = rank[lens] ?? ((a, b) => b.size - a.size)
+      for (const item of items.filter((i) => i.lenses.includes(lens)).sort(order).slice(0, limit)) {
         selected.set(item.key, item)
       }
     }
@@ -730,12 +811,20 @@ export default async function mediaRoutes(fastify) {
       const matching = items.filter((i) => i.lenses.includes(lens))
       lensTotals[lens] = {
         count: matching.length,
-        bytes: matching.reduce((sum, i) => sum + i.size, 0),
+        bytes: matching.reduce((sum, i) => sum + (lens === 'downgrade' ? i.downgrade.saving : i.size), 0),
         // Lets the UI say "showing the largest 400 of 900" rather than quietly
         // disagreeing with its own tab count.
         shown: candidates.filter((i) => i.lenses.includes(lens)).length,
       }
     }
+
+    // Profiles each movie instance could downgrade to, 1080p-looking ones first.
+    const downgradeProfiles = {}
+    targets.forEach((t, i) => {
+      if (t.kind !== 'movie') return
+      const profiles = (profileResults[i] || []).map((p) => ({ id: p.id, name: p.name }))
+      downgradeProfiles[t.proxyBase] = profiles.sort((a, b) => Number(/1080/.test(b.name)) - Number(/1080/.test(a.name)))
+    })
 
     return {
       generatedAt: new Date().toISOString(),
@@ -743,6 +832,8 @@ export default async function mediaRoutes(fastify) {
         instances: reachable,
         tautulli: !!tautulliIndex,
         plex: !!guidIndex,
+        history: !!history,
+        overseerr: !!requestsResult,
         // The UI uses these to explain why a lens is unavailable rather than
         // showing it as merely empty. Orphans only needs Plex to say what's in
         // the library; never-played and stale need Tautulli's play counts.
@@ -753,11 +844,36 @@ export default async function mediaRoutes(fastify) {
       },
       settings: { neverPlayedDays, staleMonths },
       totals: {
-        scanned: items.length,
-        bytesOnDisk: items.reduce((sum, i) => sum + i.size, 0),
+        scanned: items.filter((i) => i.unit !== 'season').length,
+        bytesOnDisk: items.filter((i) => i.unit !== 'season').reduce((sum, i) => sum + i.size, 0),
+        kept,
+        keptBytes,
       },
       lensTotals,
-      candidates: candidates.map(({ addedMs, lastPlayedMs, ...rest }) => rest),
+      downgradeProfiles,
+      candidates: candidates.map(({ addedMs, lastPlayedMs, requestedAtMs, raw, showHist, targetIndex, reasonSeason, ...rest }) => rest),
+    }
+  })
+
+  // One action on one candidate: delete (with exclusion + Overseerr cleanup),
+  // keep (tag), or downgrade. The browser calls this per item so it can show progress.
+  fastify.post('/reclaim/action', async (request, reply) => {
+    const config = await getConfig()
+    const b = request.body || {}
+    if (!['delete', 'keep', 'downgrade'].includes(b.action)) return reply.status(400).send({ error: 'Unknown action' })
+    const target = reclaimTargets(config).find((t) => t.proxyBase === b.proxyBase)
+    if (!target) return reply.status(400).send({ error: `Unknown instance ${b.proxyBase}` })
+    const arrId = Number(b.arrId)
+    if (!Number.isInteger(arrId)) return reply.status(400).send({ error: 'arrId required' })
+    try {
+      const result = await performAction({
+        action: b.action, unit: b.unit, kind: target.kind, arrId,
+        seasonNumber: b.seasonNumber != null ? Number(b.seasonNumber) : undefined,
+        mediaId: b.mediaId ?? null, profileId: b.profileId != null ? Number(b.profileId) : undefined,
+      }, target.svc, config.services.overseerr?.enabled ? config.services.overseerr : null)
+      return { ok: true, ...result }
+    } catch (err) {
+      return reply.status(502).send({ ok: false, error: err.message })
     }
   })
 

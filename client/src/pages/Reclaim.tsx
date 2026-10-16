@@ -10,15 +10,29 @@ import MediaDetail from '../components/MediaDetail'
 // Tautulli play counts. Each candidate carries the lenses it matched, so
 // switching tabs here is pure client-side filtering over one fetch.
 //
-// Every action goes through the proxy using the candidate's own proxyBase, so
-// secondary instances (a separate 4K Radarr, say) act on the right server.
+// Delete, keep and downgrade go through POST /api/media/reclaim/action, which
+// does every step (import exclusion, Overseerr cleanup, season unmonitor) so a
+// deleted title doesn't quietly come back. Each candidate carries its own
+// proxyBase, so secondary instances (a separate 4K Radarr, say) act on the
+// right server.
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Lens = 'never-played' | 'stale' | 'largest' | 'duplicates' | 'orphans'
+type Lens = 'recommended' | 'seasons' | 'never-played' | 'stale' | 'downgrade' | 'largest' | 'duplicates' | 'orphans'
 
 interface Candidate {
   key: string
+  unit: 'movie' | 'series' | 'season'
+  seasonNumber?: number
+  seasonLabel?: string
+  viewers: number
+  requestedBy: string[] | null
+  requesterWatched: boolean | null
+  mediaId: number | null
+  why?: string
+  score?: number
+  regret?: number
+  downgrade?: { saving: number; estimate: number; movieFileId: number | null }
   kind: 'movie' | 'series'
   arrId: number
   proxyBase: string
@@ -45,15 +59,20 @@ interface ReclaimResponse {
     instances: string[]
     tautulli: boolean
     plex: boolean
+    history: boolean
+    overseerr: boolean
     watchLensesAvailable: boolean
     orphanLensAvailable: boolean
     exactMatching: boolean
   }
   settings: { neverPlayedDays: number; staleMonths: number }
-  totals: { scanned: number; bytesOnDisk: number }
+  totals: { scanned: number; bytesOnDisk: number; kept: number; keptBytes: number }
   lensTotals: Record<Lens, { count: number; bytes: number; shown: number }>
+  downgradeProfiles: Record<string, { id: number; name: string }[]>
   candidates: Candidate[]
 }
+
+const TB = 1_099_511_627_776
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -79,6 +98,24 @@ function timeAgo(d: string | null) {
 type LensNeed = 'none' | 'watch' | 'library'
 
 const LENS_META: Record<Lens, { label: string; blurb: string; needs: LensNeed }> = {
+  recommended: {
+    label: 'Recommended',
+    blurb:
+      'Never played, long unwatched, and seasons nobody reached — ranked by space freed against how much it would be missed (recent requests and recent viewers count against).',
+    needs: 'watch',
+  },
+  seasons: {
+    label: 'TV Seasons',
+    blurb:
+      "Seasons of shows people did watch, but that nobody got to, or finished long ago. Deleting a season removes its files and unmonitors it; the rest of the show stays.",
+    needs: 'watch',
+  },
+  downgrade: {
+    label: 'Downgrade',
+    blurb:
+      'Big 4K / remux movies that are rarely watched. Keep them at 1080p instead: switch the profile, delete the big file, and search. The size shown is the estimated saving.',
+    needs: 'watch',
+  },
   'never-played': {
     label: 'Never Played',
     blurb: 'Has files, zero plays in Tautulli, and old enough to have had a fair chance.',
@@ -116,23 +153,26 @@ const lensBlocked = (lens: Lens, sources?: ReclaimResponse['sources']) => {
   return false
 }
 
-const LENS_ORDER: Lens[] = ['never-played', 'stale', 'largest', 'duplicates', 'orphans']
+const LENS_ORDER: Lens[] = ['recommended', 'seasons', 'never-played', 'stale', 'downgrade', 'largest', 'duplicates', 'orphans']
 
 // ── Confirm modal ──────────────────────────────────────────────────────────
 
 function ConfirmDelete({
   count,
   bytes,
+  variant = 'delete',
   onCancel,
   onConfirm,
 }: {
   count: number
   bytes: number
+  variant?: 'delete' | 'downgrade'
   onCancel: () => void
   onConfirm: () => void
 }) {
   const [typed, setTyped] = useState('')
-  const armed = typed.trim().toUpperCase() === 'DELETE'
+  const word = variant === 'delete' ? 'DELETE' : 'DOWNGRADE'
+  const armed = typed.trim().toUpperCase() === word
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onCancel}>
@@ -141,23 +181,34 @@ function ConfirmDelete({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 border-b border-gray-800">
-          <h3 className="text-white font-semibold">Delete {count} item{count === 1 ? '' : 's'}?</h3>
+          <h3 className="text-white font-semibold">
+            {variant === 'delete' ? 'Delete' : 'Downgrade'} {count} item{count === 1 ? '' : 's'}?
+          </h3>
         </div>
         <div className="px-5 py-4 space-y-3">
-          <p className="text-sm text-gray-400">
-            This removes them from Radarr/Sonarr <span className="text-red-400">and deletes the files from disk</span>.
-            It cannot be undone.
-          </p>
+          {variant === 'delete' ? (
+            <p className="text-sm text-gray-400">
+              Whole titles are removed from Radarr/Sonarr <span className="text-red-400">and their files deleted</span>,
+              with an import-list exclusion so they don't come back, and their Overseerr request cleared so they can be
+              requested again. Seasons have their files deleted and the season unmonitored. It cannot be undone.
+            </p>
+          ) : (
+            <p className="text-sm text-gray-400">
+              Each movie is switched to the chosen profile,{' '}
+              <span className="text-red-400">its current file is deleted</span>, and Radarr searches for a smaller
+              copy. Until that downloads, the movie is unavailable.
+            </p>
+          )}
           <p className="text-sm text-gray-300">
             Frees roughly <span className="text-white font-semibold">{formatBytes(bytes)}</span>.
           </p>
           <div>
-            <label className="text-xs text-gray-500 block mb-1.5">Type DELETE to confirm</label>
+            <label className="text-xs text-gray-500 block mb-1.5">Type {word} to confirm</label>
             <input
               autoFocus
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              placeholder="DELETE"
+              placeholder={word}
               className="input w-full"
             />
           </div>
@@ -174,7 +225,7 @@ function ConfirmDelete({
             disabled={!armed}
             className="flex-1 text-sm py-2 rounded-lg bg-red-800 hover:bg-red-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Delete &amp; free space
+            {variant === 'delete' ? 'Delete & free space' : 'Downgrade'}
           </button>
         </div>
       </div>
@@ -184,7 +235,7 @@ function ConfirmDelete({
 
 // ── Sorting ────────────────────────────────────────────────────────────────
 
-type SortKey = 'title' | 'instance' | 'lastPlayed' | 'added' | 'size'
+type SortKey = 'title' | 'instance' | 'lastPlayed' | 'added' | 'size' | 'score'
 type SortDir = 'asc' | 'desc'
 
 // Text columns default to A→Z on first click; everything else (dates, size)
@@ -196,7 +247,14 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   lastPlayed: 'desc',
   added: 'desc',
   size: 'desc',
+  score: 'desc',
 }
+
+// What acting on a row actually frees: a downgrade keeps most of the title.
+const freed = (c: Candidate, lens: Lens) => (lens === 'downgrade' && c.downgrade ? c.downgrade.saving : c.size)
+
+// Each lens opens in the order that makes sense for it.
+const lensSort = (l: Lens): SortKey => (l === 'recommended' ? 'score' : 'size')
 
 // Never-played items have no lastPlayed date at all. Rather than let them land
 // wherever a null happens to sort, they're pinned to the "never" end regardless
@@ -208,6 +266,7 @@ function compareCandidates(a: Candidate, b: Candidate, key: SortKey, dir: SortDi
   if (key === 'title') return sign * a.title.localeCompare(b.title)
   if (key === 'instance') return sign * a.instance.localeCompare(b.instance)
   if (key === 'size') return sign * (a.size - b.size)
+  if (key === 'score') return sign * ((a.score ?? 0) - (b.score ?? 0))
 
   const field = key === 'lastPlayed' ? 'lastPlayed' : 'added'
   const av = a[field] ? new Date(a[field] as string).getTime() : null
@@ -253,15 +312,17 @@ export default function Reclaim() {
   const { enabledServices } = useConfig()
   const queryClient = useQueryClient()
 
-  const [lens, setLens] = useState<Lens>('never-played')
+  const [lens, setLens] = useState<Lens>('recommended')
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
   const [detail, setDetail] = useState<{ kind: 'movie' | 'series'; id: number } | null>(null)
-  const [confirming, setConfirming] = useState(false)
+  const [confirming, setConfirming] = useState<'delete' | 'downgrade' | null>(null)
+  const [goalTb, setGoalTb] = useState('1')
+  const [profileId, setProfileId] = useState<number | null>(null)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [result, setResult] = useState<string | null>(null)
   const [neverPlayedDays, setNeverPlayedDays] = useState(90)
   const [staleMonths, setStaleMonths] = useState(12)
-  const [sortKey, setSortKey] = useState<SortKey>('size')
+  const [sortKey, setSortKey] = useState<SortKey>('score')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const enabled = enabledServices.includes('radarr') || enabledServices.includes('sonarr')
@@ -296,7 +357,30 @@ export default function Reclaim() {
     () => (data?.candidates ?? []).filter((c) => selectedKeys.has(c.key)),
     [data, selectedKeys]
   )
-  const selectedBytes = selected.reduce((sum, c) => sum + c.size, 0)
+  const selectedBytes = selected.reduce((sum, c) => sum + freed(c, lens), 0)
+  const hasSeasons = selected.some((c) => c.unit === 'season')
+  const allDowngradable = selected.length > 0 && selected.every((c) => c.downgrade)
+
+  // Downgrade targets come from the primary Radarr's profiles; 1080p first.
+  const profiles = data?.downgradeProfiles?.radarr ?? Object.values(data?.downgradeProfiles ?? {})[0] ?? []
+  const chosenProfile = profileId ?? profiles[0]?.id ?? null
+
+  // "Free up X TB": take the best-ranked recommendations until the goal is met.
+  const selectForGoal = () => {
+    const goal = parseFloat(goalTb) * TB
+    if (!Number.isFinite(goal) || goal <= 0) return
+    const ranked = (data?.candidates ?? [])
+      .filter((c) => c.lenses.includes('recommended'))
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    const next = new Set<string>()
+    let total = 0
+    for (const c of ranked) {
+      if (total >= goal) break
+      next.add(c.key)
+      total += c.size
+    }
+    setSelectedKeys(next)
+  }
 
   const toggle = (key: string) =>
     setSelectedKeys((prev) => {
@@ -316,6 +400,12 @@ export default function Reclaim() {
     })
 
   const arrPath = (c: Candidate) => (c.kind === 'movie' ? 'movie' : 'series')
+
+  const act = (action: 'delete' | 'keep' | 'downgrade', c: Candidate, extra: Record<string, unknown> = {}) =>
+    api.post('/media/reclaim/action', {
+      action, unit: c.unit, proxyBase: c.proxyBase, arrId: c.arrId,
+      seasonNumber: c.seasonNumber, mediaId: c.mediaId, ...extra,
+    })
 
   // Both bulk actions run sequentially rather than in parallel — a hundred
   // simultaneous deletes is a good way to make an *arr instance fall over.
@@ -357,14 +447,19 @@ export default function Reclaim() {
     })
 
   const deleteSelected = async () => {
-    setConfirming(false)
-    const freed = selectedBytes
-    await runBulk(`Deleted, freeing ${formatBytes(freed)}`, (c) =>
-      api.delete(`/proxy/${c.proxyBase}/api/v3/${arrPath(c)}/${c.arrId}`, {
-        params: { deleteFiles: true, addImportExclusion: false },
-      })
+    setConfirming(null)
+    await runBulk(`Deleted, freeing ${formatBytes(selectedBytes)}`, (c) => act('delete', c))
+  }
+
+  const downgradeSelected = async () => {
+    setConfirming(null)
+    await runBulk(`Downgrading, freeing about ${formatBytes(selectedBytes)}`, (c) =>
+      act('downgrade', c, { profileId: chosenProfile })
     )
   }
+
+  // Keep tags the whole title, so a season's "keep" protects its show.
+  const keepSelected = () => runBulk('Tagged keep', (c) => act('keep', c))
 
   if (!enabled) {
     return (
@@ -388,6 +483,7 @@ export default function Reclaim() {
             <p className="text-xs text-gray-500 mt-0.5">
               {data.totals.scanned.toLocaleString()} titles with files · {formatBytes(data.totals.bytesOnDisk)} on disk
               {data.sources.instances.length > 0 && ` · ${data.sources.instances.join(', ')}`}
+              {data.totals.kept > 0 && ` · ${data.totals.kept} tagged keep (${formatBytes(data.totals.keptBytes)}) hidden`}
             </p>
           )}
         </div>
@@ -424,7 +520,8 @@ export default function Reclaim() {
       {/* Lens tabs */}
       <div className="flex gap-2 mb-4 flex-wrap">
         {LENS_ORDER.map((l) => {
-          const selectLens = () => { setLens(l); setSortKey('size'); setSortDir('desc') }
+          // Selection is cleared on switch, so an action never touches rows you can't see.
+          const selectLens = () => { setLens(l); setSortKey(lensSort(l)); setSortDir('desc'); setSelectedKeys(new Set()) }
           const totals = data?.lensTotals?.[l]
           const disabled = lensBlocked(l, data?.sources)
           return (
@@ -451,15 +548,43 @@ export default function Reclaim() {
         {meta.blurb}
         {data && data.lensTotals[lens].shown < data.lensTotals[lens].count && (
           <span className="text-gray-600">
-            {' '}Showing the largest {data.lensTotals[lens].shown} of {data.lensTotals[lens].count}.
+            {' '}Showing the {lens === 'recommended' ? 'top-ranked' : 'largest'} {data.lensTotals[lens].shown} of{' '}
+            {data.lensTotals[lens].count}.
           </span>
+        )}
+        {lens === 'recommended' && data && !data.sources.overseerr && (
+          <span className="text-gray-600"> Connect Overseerr to factor in who requested what.</span>
         )}
       </p>
 
+      {/* Goal */}
+      {lens === 'recommended' && data && data.lensTotals.recommended.count > 0 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap text-xs text-gray-500">
+          Free up
+          <input
+            value={goalTb}
+            onChange={(e) => setGoalTb(e.target.value)}
+            inputMode="decimal"
+            className="input text-xs py-1 w-16 text-right"
+            aria-label="Goal in TB"
+          />
+          TB
+          <button
+            onClick={selectForGoal}
+            className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+          >
+            Select best picks
+          </button>
+          <span className="text-gray-600">
+            Up to {formatBytes(data.lensTotals.recommended.bytes)} available here.
+          </span>
+        </div>
+      )}
+
       {/* Thresholds */}
-      {(lens === 'never-played' || lens === 'stale') && (
+      {(lens === 'never-played' || lens === 'stale' || lens === 'recommended') && (
         <div className="flex items-center gap-4 mb-4 flex-wrap">
-          {lens === 'never-played' && (
+          {(lens === 'never-played' || lens === 'recommended') && (
             <label className="flex items-center gap-2 text-xs text-gray-500">
               Added more than
               <select
@@ -474,7 +599,7 @@ export default function Reclaim() {
               ago
             </label>
           )}
-          {lens === 'stale' && (
+          {(lens === 'stale' || lens === 'recommended') && (
             <label className="flex items-center gap-2 text-xs text-gray-500">
               Not played in over
               <select
@@ -515,7 +640,7 @@ export default function Reclaim() {
             {selected.length} selected ·{' '}
             <span className="text-green-400 font-semibold">{formatBytes(selectedBytes)}</span> reclaimable
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap items-center">
             <button
               onClick={() => setSelectedKeys(new Set())}
               className="text-xs px-3 py-1.5 rounded bg-gray-800 text-gray-400 hover:text-white transition-colors"
@@ -523,19 +648,52 @@ export default function Reclaim() {
               Clear
             </button>
             <button
-              onClick={unmonitorSelected}
+              onClick={keepSelected}
               disabled={!!busy}
+              title="Tag &quot;keep&quot; in Radarr/Sonarr — Reclaim won't suggest it again"
               className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-60"
             >
-              Unmonitor
+              Keep
             </button>
-            <button
-              onClick={() => setConfirming(true)}
-              disabled={!!busy}
-              className="text-xs px-3 py-1.5 rounded bg-red-800 hover:bg-red-700 text-white transition-colors disabled:opacity-60"
-            >
-              Delete &amp; free space
-            </button>
+            {!hasSeasons && (
+              <button
+                onClick={unmonitorSelected}
+                disabled={!!busy}
+                className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-60"
+              >
+                Unmonitor
+              </button>
+            )}
+            {lens === 'downgrade' && allDowngradable && profiles.length > 0 && (
+              <>
+                <select
+                  value={chosenProfile ?? ''}
+                  onChange={(e) => setProfileId(Number(e.target.value))}
+                  className="input text-xs py-1 pr-7"
+                  aria-label="Downgrade to profile"
+                >
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setConfirming('downgrade')}
+                  disabled={!!busy}
+                  className="text-xs px-3 py-1.5 rounded bg-amber-700 hover:bg-amber-600 text-white transition-colors disabled:opacity-60"
+                >
+                  Downgrade
+                </button>
+              </>
+            )}
+            {lens !== 'downgrade' && (
+              <button
+                onClick={() => setConfirming('delete')}
+                disabled={!!busy}
+                className="text-xs px-3 py-1.5 rounded bg-red-800 hover:bg-red-700 text-white transition-colors disabled:opacity-60"
+              >
+                Delete &amp; free space
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -605,12 +763,18 @@ export default function Reclaim() {
                             Unmonitored
                           </span>
                         )}
+                        {c.unit === 'season' && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300">
+                            {c.seasonLabel}
+                          </span>
+                        )}
                         {c.kind === 'series' && (
                           <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">
                             {c.episodeFileCount} eps
                           </span>
                         )}
                         {c.note && <span className="block text-xs text-gray-600 mt-0.5">{c.note}</span>}
+                        {c.why && <span className="block text-xs text-gray-500 mt-0.5">{c.why}</span>}
                       </button>
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-500 hidden md:table-cell">
@@ -630,8 +794,15 @@ export default function Reclaim() {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-600 hidden lg:table-cell">{timeAgo(c.added)}</td>
-                    <td className="px-4 py-2.5 text-xs text-gray-300 tabular-nums text-right">
-                      {formatBytes(c.size)}
+                    <td className="px-4 py-2.5 text-xs text-gray-300 tabular-nums text-right whitespace-nowrap">
+                      {lens === 'downgrade' && c.downgrade ? (
+                        <>
+                          <span className="text-green-400">−{formatBytes(c.downgrade.saving)}</span>
+                          <span className="block text-gray-600">of {formatBytes(c.size)}</span>
+                        </>
+                      ) : (
+                        formatBytes(c.size)
+                      )}
                     </td>
                   </tr>
                 )
@@ -658,8 +829,9 @@ export default function Reclaim() {
         <ConfirmDelete
           count={selected.length}
           bytes={selectedBytes}
-          onCancel={() => setConfirming(false)}
-          onConfirm={deleteSelected}
+          variant={confirming}
+          onCancel={() => setConfirming(null)}
+          onConfirm={confirming === 'delete' ? deleteSelected : downgradeSelected}
         />
       )}
     </div>
