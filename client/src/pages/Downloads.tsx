@@ -36,6 +36,7 @@ interface DownloadItem {
   status: string
   rawState: string
   canDeleteFiles: boolean
+  dead?: 'no-metadata' | 'no-seeders' | null
 }
 
 interface ImportingItem {
@@ -58,6 +59,7 @@ interface DownloadsData {
   importing: ImportingItem[]
   arrQueueHashes: string[]   // all download IDs currently tracked by Sonarr/Radarr/Lidarr
   arrQueueOk: boolean        // false if any arr's queue couldn't be read (hashes incomplete)
+  replaceDeadTorrents?: boolean // server replaces dead torrents through the *arrs
   arrCategories: string[]    // qBittorrent categories the arrs use — the sweep touches nothing else
   limits: Record<QbitClient, { speedLimitMode: number } | null> & Record<NzbClient, { speedLimit: number } | null>
   errors: Record<DownloadClient, string | null>
@@ -113,7 +115,7 @@ function statusColor(status: string): string {
   if (status === 'error') return 'text-red-400'
   if (status === 'queued') return 'text-gray-500'
   if (status === 'processing') return 'text-purple-400'
-  if (status === 'stalled') return 'text-orange-400'
+  if (status === 'stalled' || status === 'finding peers') return 'text-orange-400'
   if (status === 'success') return 'text-green-500'
   if (status === 'failure' || status === 'deleted') return 'text-red-500'
   return 'text-gray-400'
@@ -657,6 +659,15 @@ export default function Downloads() {
                   )}
                   <td className="px-4 py-3">
                     <span className={`text-xs capitalize ${statusColor(item.status)}`}>{item.status}</span>
+                    {item.dead && (
+                      <span
+                        className="block text-[11px] text-gray-500"
+                        title={item.dead === 'no-metadata' ? 'No peers found for over 6 hours' : 'No seeders for over 24 hours'}
+                      >
+                        {item.dead === 'no-metadata' ? 'No peers' : 'No seeders'}
+                        {data?.replaceDeadTorrents ? ' · will be replaced' : ''}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {tab === 'queue' && (

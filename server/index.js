@@ -24,6 +24,7 @@ import mediaRoutes from './routes/media.js'
 import publicCalendarRoutes from './routes/publicCalendar.js'
 import webhookRoutes from './routes/webhooks.js'
 import { startAutoBackup } from './autoBackup.js'
+import { startDeadTorrentSweep } from './deadTorrents.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -86,3 +87,4 @@ await fastify.listen({ port: PORT, host: HOST })
 console.log(`MediaOps server running on http://${HOST}:${PORT}`)
 
 startAutoBackup()
+startDeadTorrentSweep()

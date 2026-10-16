@@ -67,6 +67,7 @@ export default function Settings() {
   })
   const [monitoredServers, setMonitoredServers] = useState<MonitoredServer[]>([])
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
+  const [replaceDeadTorrents, setReplaceDeadTorrents] = useState(true)
   const [shareCalendar, setShareCalendar] = useState(false)
   const [copied, setCopied] = useState<'link' | 'token' | null>(null)
   const [regenerating, setRegenerating] = useState<'link' | 'token' | null>(null)
@@ -103,6 +104,8 @@ export default function Settings() {
     if (config?.links) setLinks(config.links)
     if (typeof config?.autoDeleteAfterImport === 'boolean')
       setAutoDeleteAfterImport(config.autoDeleteAfterImport)
+    if (typeof config?.replaceDeadTorrents === 'boolean')
+      setReplaceDeadTorrents(config.replaceDeadTorrents)
     if (config?.notifications) setNotifications(config.notifications)
     if (config?.additionalInstances) setAdditionalInstances(config.additionalInstances)
     if (config?.monitoredServers) setMonitoredServers(config.monitoredServers)
@@ -178,7 +181,7 @@ export default function Settings() {
     setSaved(false)
     try {
       await updateConfig({
-        ...config!, services, links, autoDeleteAfterImport, notifications, additionalInstances, monitoredServers,
+        ...config!, services, links, autoDeleteAfterImport, replaceDeadTorrents, notifications, additionalInstances, monitoredServers,
         // Only `enabled` is honoured server-side; the secret is never taken from here.
         publicCalendar: {
           secret: config?.publicCalendar?.secret ?? '',
@@ -412,6 +415,19 @@ export default function Settings() {
           </div>
           <div className="shrink-0 mt-0.5">
             <Toggle enabled={autoDeleteAfterImport} onChange={setAutoDeleteAfterImport} />
+          </div>
+        </div>
+        <div className="mt-3 bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-white font-medium mb-0.5">Replace dead torrents</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              Every 30 minutes, torrents nobody is sharing (no peers after 6 hours, or no seeders for 24 hours) are
+              removed through Sonarr, Radarr or Lidarr and blocklisted, so they search for a different release. Main
+              qBittorrent only; MAM torrents are never touched.
+            </p>
+          </div>
+          <div className="shrink-0 mt-0.5">
+            <Toggle enabled={replaceDeadTorrents} onChange={setReplaceDeadTorrents} />
           </div>
         </div>
       </section>

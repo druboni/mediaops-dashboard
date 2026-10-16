@@ -85,6 +85,7 @@ export interface Config {
   links?: QuickLink[]
   adminPasswordHash?: string
   autoDeleteAfterImport?: boolean
+  replaceDeadTorrents?: boolean
   notifications?: NotificationsConfig
   additionalInstances?: Record<ArrInstanceType, ArrInstance[]>
   monitoredServers?: MonitoredServer[]

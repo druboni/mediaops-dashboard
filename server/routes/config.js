@@ -13,6 +13,7 @@ const CONFIG_PATH = process.env.CONFIG_PATH || join(__dirname, '../../config/con
 const DEFAULT_CONFIG = {
   links: [],
   autoDeleteAfterImport: false,
+  replaceDeadTorrents: true,
   notifications: {
     discordWebhookUrl: '',
     mediaAddedEnabled: false,
@@ -167,6 +168,8 @@ export default async function configRoutes(fastify) {
     if (Array.isArray(request.body.links)) updated.links = request.body.links
     if (typeof request.body.autoDeleteAfterImport === 'boolean')
       updated.autoDeleteAfterImport = request.body.autoDeleteAfterImport
+    if (typeof request.body.replaceDeadTorrents === 'boolean')
+      updated.replaceDeadTorrents = request.body.replaceDeadTorrents
     if (request.body.notifications && typeof request.body.notifications === 'object') {
       updated.notifications = { ...current.notifications, ...request.body.notifications }
     }

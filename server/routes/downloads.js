@@ -2,11 +2,13 @@ import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
+import { deadReason } from '../deadTorrents.js'
 
 function mapQbitState(state) {
   switch (state) {
     case 'downloading': case 'forcedDL': return 'downloading'
     case 'stalledDL': return 'stalled'
+    case 'metaDL': case 'forcedMetaDL': return 'finding peers'
     case 'pausedDL': return 'paused'
     case 'queuedDL': return 'queued'
     case 'checkingDL': case 'checkingUP': return 'checking'
@@ -88,6 +90,7 @@ async function getQbitData(url, password, client) {
 
   const queue = []
   const completed = []
+  const now = Date.now()
   for (const t of Array.isArray(torrents) ? torrents : []) {
     const item = {
       id: t.hash,
@@ -103,6 +106,8 @@ async function getQbitData(url, password, client) {
       status: mapQbitState(t.state),
       rawState: t.state,
       canDeleteFiles: true,
+      // Nobody is sharing it; the dead-torrent sweep will replace it (main qBit only).
+      dead: client === 'qbittorrent' ? deadReason(t, now) : null,
     }
     if (isQbitCompleted(t.state)) completed.push(item)
     else queue.push(item)
@@ -158,6 +163,11 @@ async function getArrQueue(url, apiKey, service) {
     // Collect every download ID in the queue (all states) so the client can
     // identify which seeding torrents Sonarr/Radarr is still tracking.
     const allHashes = new Set(records.map((r) => r.downloadId).filter(Boolean))
+
+    // Release titles by hash: a magnet that hasn't fetched its metadata yet is
+    // named only by its hash in qBittorrent, but the *arr knows what it is.
+    const titles = {}
+    for (const r of records) if (r.downloadId && r.title) titles[String(r.downloadId).toLowerCase()] = r.title
 
     const blockedRecords = records.filter((r) => {
       const state = r.trackedDownloadState
@@ -215,7 +225,7 @@ async function getArrQueue(url, apiKey, service) {
       }
     })
 
-    return { ok: true, importing, allHashes }
+    return { ok: true, importing, allHashes, titles }
   } catch {
     return { ok: false, importing: [], allHashes: new Set() }
   }
@@ -322,6 +332,12 @@ export default async function downloadsRoutes(fastify) {
     // Union of all download IDs currently tracked by Sonarr+Radarr+Lidarr (any state).
     // Used by the client to identify seeding torrents that have already been imported.
     const arrQueueHashes = arrs.flatMap((a) => [...a.allHashes])
+    const arrTitles = Object.assign({}, ...arrs.map((a) => a.titles || {}))
+    for (const q of qbits) {
+      for (const item of q?.queue || []) {
+        if (/^[0-9a-f]{40}$/i.test(item.name) && arrTitles[item.name.toLowerCase()]) item.name = arrTitles[item.name.toLowerCase()]
+      }
+    }
 
     const limits = {}
     const errors = {}
@@ -350,6 +366,7 @@ export default async function downloadsRoutes(fastify) {
       // False when an enabled arr's queue or download-client list couldn't be
       // read, i.e. the sweep would be working from incomplete information.
       arrQueueOk: arrs.every((a) => a.ok) && cats.every((c) => c.ok),
+      replaceDeadTorrents: config.replaceDeadTorrents !== false,
       limits,
       errors,
     }
