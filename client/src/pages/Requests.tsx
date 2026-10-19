@@ -207,6 +207,22 @@ function IssueDetailPanel({
   onDelete: (id: number) => void
 }) {
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [comment, setComment] = useState('')
+  const queryClient = useQueryClient()
+
+  // Overseerr's endpoints: POST issue/{id}/comment, and POST issue/{id}/{open|resolved}
+  // to change status (there is no /close; calling it 404s).
+  const act = useMutation({
+    mutationFn: async ({ message, status }: { message?: string; status?: 'resolved' | 'open' }) => {
+      if (message?.trim()) await api.post(`/proxy/overseerr/api/v1/issue/${issue.id}/comment`, { message: message.trim() })
+      if (status) await api.post(`/proxy/overseerr/api/v1/issue/${issue.id}/${status}`)
+    },
+    onSuccess: (_d, vars) => {
+      setComment('')
+      queryClient.invalidateQueries({ queryKey: ['overseerr-issue', issue.id] })
+      if (vars.status) onCloseIssue(issue.id)
+    },
+  })
 
   const { data: fullIssue } = useQuery<OverseerrIssue>({
     queryKey: ['overseerr-issue', issue.id],
@@ -293,11 +309,46 @@ function IssueDetailPanel({
             </div>
           </div>
         ) : (
-          <div className="flex gap-2">
-            {display.status === 1 && (
-              <button onClick={() => onCloseIssue(display.id)} className="flex-1 text-xs py-1.5 rounded bg-green-800 hover:bg-green-700 text-white transition-colors">Resolve</button>
+          <div className="space-y-2">
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              rows={3}
+              placeholder={display.status === 1 ? 'Add a comment (e.g. "Resolved — replaced the file")' : 'Add a comment'}
+              className="input w-full text-xs resize-none"
+            />
+            {act.isError && (
+              <p className="text-xs text-red-400">
+                Couldn't update the issue: {(act.error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (act.error as Error).message}
+              </p>
             )}
-            <button onClick={() => setDeleteConfirm(true)} className="flex-1 text-xs py-1.5 rounded bg-gray-800 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-800 transition-colors">Delete</button>
+            <div className="flex gap-2">
+              {display.status === 1 ? (
+                <button
+                  onClick={() => act.mutate({ message: comment, status: 'resolved' })}
+                  disabled={act.isPending}
+                  className="flex-1 text-xs py-1.5 rounded bg-green-800 hover:bg-green-700 text-white transition-colors disabled:opacity-60"
+                >
+                  {act.isPending ? 'Saving…' : comment.trim() ? 'Comment & resolve' : 'Resolve'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => act.mutate({ message: comment, status: 'open' })}
+                  disabled={act.isPending}
+                  className="flex-1 text-xs py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-60"
+                >
+                  Reopen
+                </button>
+              )}
+              <button
+                onClick={() => act.mutate({ message: comment })}
+                disabled={act.isPending || !comment.trim()}
+                className="flex-1 text-xs py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40"
+              >
+                Comment
+              </button>
+              <button onClick={() => setDeleteConfirm(true)} className="text-xs px-3 py-1.5 rounded bg-gray-800 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-800 transition-colors">Delete</button>
+            </div>
           </div>
         )}
       </div>
@@ -396,8 +447,9 @@ export default function Requests() {
     mutationFn: (id: number) => api.post(`/proxy/overseerr/api/v1/request/${id}/retry`),
     onSuccess: () => invalidateAll(),
   })
+  // Overseerr changes status with POST issue/{id}/{open|resolved}; there is no /close.
   const closeIssue = useMutation({
-    mutationFn: (id: number) => api.post(`/proxy/overseerr/api/v1/issue/${id}/close`),
+    mutationFn: (id: number) => api.post(`/proxy/overseerr/api/v1/issue/${id}/resolved`),
     onSuccess: () => { invalidateIssues(); setSelectedIssue(null) },
   })
   const deleteIssue = useMutation({
@@ -701,7 +753,7 @@ export default function Requests() {
         <IssueDetailPanel
           issue={selectedIssue}
           onClose={closePanel}
-          onCloseIssue={(id) => closeIssue.mutate(id)}
+          onCloseIssue={() => { invalidateIssues(); setSelectedIssue(null) }}
           onDelete={(id) => deleteIssue.mutate(id)}
         />
       )}
