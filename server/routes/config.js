@@ -14,6 +14,8 @@ const DEFAULT_CONFIG = {
   links: [],
   autoDeleteAfterImport: false,
   replaceDeadTorrents: true,
+  // Remove releases containing programs or archives (see server/badFiles.js).
+  removeBadFiles: true,
   notifications: {
     discordWebhookUrl: '',
     mediaAddedEnabled: false,
@@ -170,6 +172,8 @@ export default async function configRoutes(fastify) {
       updated.autoDeleteAfterImport = request.body.autoDeleteAfterImport
     if (typeof request.body.replaceDeadTorrents === 'boolean')
       updated.replaceDeadTorrents = request.body.replaceDeadTorrents
+    if (typeof request.body.removeBadFiles === 'boolean')
+      updated.removeBadFiles = request.body.removeBadFiles
     if (request.body.notifications && typeof request.body.notifications === 'object') {
       updated.notifications = { ...current.notifications, ...request.body.notifications }
     }

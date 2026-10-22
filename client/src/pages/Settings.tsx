@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import { useTheme, THEMES } from '../store/theme'
 import api from '../services/api'
@@ -53,6 +53,55 @@ const EMPTY_SERVICES: Config['services'] = Object.fromEntries(
 
 type TestStatus = 'idle' | 'testing' | 'ok' | 'error'
 
+interface BadFileEntry {
+  time: number
+  release: string
+  service: string
+  kinds: string[]
+  files: string[]
+  fileCount: number
+  result: 'removed' | 'failed'
+  error?: string
+}
+
+/** Releases removed for containing programs or archives (server/badFiles.js), newest first. */
+function BadFileLog() {
+  const [open, setOpen] = useState(false)
+  const { data, isLoading } = useQuery({
+    queryKey: ['bad-files'],
+    queryFn: () => api.get<BadFileEntry[]>('/downloads/bad-files').then((r) => r.data),
+    enabled: open,
+  })
+  return (
+    <div className="mt-3 border-t border-gray-800 pt-3">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="text-xs text-gray-400 hover:text-white">
+        {open ? 'Hide' : 'Show'} removal log
+      </button>
+      {open && (
+        <div className="mt-2 max-h-80 overflow-y-auto space-y-2">
+          {isLoading && <p className="text-xs text-gray-500">Loading…</p>}
+          {data && !data.length && <p className="text-xs text-gray-500">Nothing removed yet.</p>}
+          {data?.map((e, i) => (
+            <div key={i} className="rounded bg-gray-950 border border-gray-800 px-3 py-2 text-xs">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-white font-medium break-all">{e.release}</span>
+                <span className="text-gray-500 shrink-0">{new Date(e.time).toLocaleString()}</span>
+              </div>
+              <p className={e.result === 'removed' ? 'text-gray-400' : 'text-amber-400'}>
+                {e.result === 'removed' ? 'Removed and blocklisted' : `Couldn't remove (${e.error})`} via {e.service} ·{' '}
+                {e.kinds.map((k) => (k === 'program' ? 'program' : 'archive')).join(' + ')}
+              </p>
+              <p className="text-gray-500 break-all">
+                {e.files.join(', ')}{e.fileCount > e.files.length ? ` and ${e.fileCount - e.files.length} more` : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Settings() {
   const { config, updateConfig } = useConfig()
   const { theme, setTheme } = useTheme()
@@ -68,6 +117,7 @@ export default function Settings() {
   const [monitoredServers, setMonitoredServers] = useState<MonitoredServer[]>([])
   const [autoDeleteAfterImport, setAutoDeleteAfterImport] = useState(false)
   const [replaceDeadTorrents, setReplaceDeadTorrents] = useState(true)
+  const [removeBadFiles, setRemoveBadFiles] = useState(true)
   const [shareCalendar, setShareCalendar] = useState(false)
   const [copied, setCopied] = useState<'link' | 'token' | null>(null)
   const [regenerating, setRegenerating] = useState<'link' | 'token' | null>(null)
@@ -106,6 +156,8 @@ export default function Settings() {
       setAutoDeleteAfterImport(config.autoDeleteAfterImport)
     if (typeof config?.replaceDeadTorrents === 'boolean')
       setReplaceDeadTorrents(config.replaceDeadTorrents)
+    if (typeof config?.removeBadFiles === 'boolean')
+      setRemoveBadFiles(config.removeBadFiles)
     if (config?.notifications) setNotifications(config.notifications)
     if (config?.additionalInstances) setAdditionalInstances(config.additionalInstances)
     if (config?.monitoredServers) setMonitoredServers(config.monitoredServers)
@@ -181,7 +233,7 @@ export default function Settings() {
     setSaved(false)
     try {
       await updateConfig({
-        ...config!, services, links, autoDeleteAfterImport, replaceDeadTorrents, notifications, additionalInstances, monitoredServers,
+        ...config!, services, links, autoDeleteAfterImport, replaceDeadTorrents, removeBadFiles, notifications, additionalInstances, monitoredServers,
         // Only `enabled` is honoured server-side; the secret is never taken from here.
         publicCalendar: {
           secret: config?.publicCalendar?.secret ?? '',
@@ -429,6 +481,23 @@ export default function Settings() {
           <div className="shrink-0 mt-0.5">
             <Toggle enabled={replaceDeadTorrents} onChange={setReplaceDeadTorrents} />
           </div>
+        </div>
+        <div className="mt-3 bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-white font-medium mb-0.5">Remove bad releases</p>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Every 5 minutes, any torrent with a program (.exe, .msi, .bat, .scr, .lnk and similar) or an archive (.7z, .zip,
+                .rar and similar) inside is removed through Sonarr, Radarr or Lidarr with its files and blocklisted, so they search
+                for a different release. These are fake or unimportable releases. It checks the file list, so they go before they
+                finish downloading. Main qBittorrent only, *arr downloads only; MAM torrents and anything added by hand are never touched.
+              </p>
+            </div>
+            <div className="shrink-0 mt-0.5">
+              <Toggle enabled={removeBadFiles} onChange={setRemoveBadFiles} />
+            </div>
+          </div>
+          <BadFileLog />
         </div>
       </section>
 

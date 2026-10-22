@@ -86,6 +86,7 @@ export interface Config {
   adminPasswordHash?: string
   autoDeleteAfterImport?: boolean
   replaceDeadTorrents?: boolean
+  removeBadFiles?: boolean
   notifications?: NotificationsConfig
   additionalInstances?: Record<ArrInstanceType, ArrInstance[]>
   monitoredServers?: MonitoredServer[]

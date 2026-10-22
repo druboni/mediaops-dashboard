@@ -3,6 +3,7 @@ import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 import { deadReason } from '../deadTorrents.js'
+import { badFileLog } from '../badFiles.js'
 
 function mapQbitState(state) {
   switch (state) {
@@ -508,6 +509,9 @@ export default async function downloadsRoutes(fastify) {
 
   // List candidate files Radarr/Sonarr found for a stuck (importBlocked) download,
   // so the user can confirm the match instead of switching to the arr's own UI.
+  // Releases removed for containing programs or archives, newest first.
+  fastify.get('/bad-files', async () => badFileLog())
+
   fastify.get('/manual-import', async (request, reply) => {
     const config = await getConfig()
     const { service, downloadId } = request.query
