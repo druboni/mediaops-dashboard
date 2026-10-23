@@ -9,7 +9,8 @@ SRC=$(mktemp -d)
 trap 'rm -rf "$SRC"' EXIT
 
 git clone --depth 1 --quiet https://github.com/druboni/mediaops-dashboard.git "$SRC"
-docker build -t mediaops-calendar-share:latest -f "$SRC/calendar-share/Dockerfile" "$SRC"
+# --pull: always start from the newest node:22-alpine, so rebuilds pick up Node security releases.
+docker build --pull -t mediaops-calendar-share:latest -f "$SRC/calendar-share/Dockerfile" "$SRC"
 
 mkdir -p "$DEPLOY_DIR"
 cp "$SRC/calendar-share/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
