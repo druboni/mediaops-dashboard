@@ -358,7 +358,8 @@ export default async function dashboardRoutes(fastify) {
     const at = (name) => ({ url: svcs[name].url.replace(/\/$/, ''), key: svcs[name].apiKey })
 
     const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, nzbgetMusic, huntarr, requestrr, tautulli, plexDisk,
-      qbitMam, listenarr, listenarrMam, audiobookshelf, audiobookRequester] =
+      qbitMam, listenarr, listenarrMam, audiobookshelf, audiobookRequester,
+      audiobookshelfDemo, homeshelfWeb, plexampRequester, wizarr] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -380,6 +381,10 @@ export default async function dashboardRoutes(fastify) {
         on('listenarrMam') ? getJsonHealth(at('listenarrMam').url, '/api/v1/system/info', arrH(at('listenarrMam').key), d => d?.version) : null,
         on('audiobookshelf') ? getJsonHealth(at('audiobookshelf').url, '/status', {}, d => d?.serverVersion) : null,
         on('audiobookRequester') ? getJsonHealth(at('audiobookRequester').url, '/api/ping', {}, d => d?.version) : null,
+        on('audiobookshelfDemo') ? getJsonHealth(at('audiobookshelfDemo').url, '/status', {}, d => d?.serverVersion) : null,
+        on('homeshelfWeb') ? getJsonHealth(at('homeshelfWeb').url, '/api/ping', {}, d => d?.version) : null,
+        on('plexampRequester') ? getJsonHealth(at('plexampRequester').url, '/api/ping', {}, d => d?.version) : null,
+        on('wizarr')       ? getSimpleHealth(at('wizarr').url, '/')                       : null,
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
@@ -396,6 +401,8 @@ export default async function dashboardRoutes(fastify) {
     addHealth('tautulli', tautulli)
     addHealth('qbittorrentMam', qbitMam); addHealth('listenarr', listenarr); addHealth('listenarrMam', listenarrMam)
     addHealth('audiobookshelf', audiobookshelf); addHealth('audiobookRequester', audiobookRequester)
+    addHealth('audiobookshelfDemo', audiobookshelfDemo); addHealth('homeshelfWeb', homeshelfWeb)
+    addHealth('plexampRequester', plexampRequester); addHealth('wizarr', wizarr)
 
     addLog('debug', '[dashboard] poll complete', {
       service: 'dashboard',

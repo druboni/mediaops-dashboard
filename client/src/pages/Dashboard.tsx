@@ -103,6 +103,8 @@ const SERVICE_LABELS: Partial<Record<ServiceName, string>> = {
   huntarr: 'Huntarr', requestrr: 'Requestrr', tautulli: 'Tautulli',
   qbittorrentMam: 'qBittorrent (MAM)', listenarr: 'Listenarr', listenarrMam: 'Listenarr (MAM)',
   audiobookshelf: 'Audiobookshelf', audiobookRequester: 'Audiobook Requester',
+  audiobookshelfDemo: 'Audiobookshelf (Demo)', homeshelfWeb: 'Homeshelf Web',
+  plexampRequester: 'Plexamp Requester', wizarr: 'Wizarr',
 }
 
 // ── Hooks ──────────────────────────────────────────────────────────────

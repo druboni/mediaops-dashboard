@@ -60,6 +60,10 @@ const TEST_ENDPOINT = {
     ? { url: `${url}/api/libraries`, headers: { Authorization: `Bearer ${key}` }, expectJson: true }
     : { url: `${url}/status`, headers: {}, expectJson: true },
   audiobookRequester: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
+  audiobookshelfDemo: (url) => ({ url: `${url}/status`, headers: {}, expectJson: true }),
+  homeshelfWeb: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
+  plexampRequester: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
+  wizarr:    (url)      => ({ url: `${url}/`,                     headers: {} }),
   huntarr:   (url, key) => ({ url: `${url}/api/v1/system/status`, headers: { 'X-Api-Key': key } }),
   requestrr: (url)      => ({ url: `${url}/`,                     headers: {} }),
   tautulli:  (url, key) => ({ url: `${url}/api/v2?apikey=${encodeURIComponent(key)}&cmd=get_server_info`, headers: {} }),
