@@ -25,7 +25,13 @@ Every request needs "Authorization: Bearer <token>". Allowed:
     GET  /containers/{id}/logs?...       (stdout/stderr/tail/timestamps)
     GET  /images/{id}/json               (only RepoDigests)
     POST /containers/{id}/restart?t=10
+    POST /containers/{name}/update       (one-off Watchtower run for that container)
 Everything else is 404.
+
+The update runs nickfedor/watchtower --run-once --cleanup <name> in a throwaway
+container, which pulls the new image and recreates the container with the same
+settings. It's the only container this sidecar ever creates, and only for the
+name of a container that already exists.
 """
 
 import hmac
@@ -42,6 +48,9 @@ SOCKET = os.environ.get("DOCKER_SOCKET", "/var/run/docker.sock")
 TOKEN = os.environ.get("DOCKER_SIDECAR_TOKEN", "")
 NAME = r"[A-Za-z0-9_.-]+"
 LOG_PARAMS = {"stdout", "stderr", "tail", "timestamps"}
+WATCHTOWER_IMAGE = "nickfedor/watchtower:latest"
+# Updating ourselves would kill this request halfway; use docker compose for that.
+SELF_NAME = os.environ.get("DOCKER_SIDECAR_NAME", "mediaops-docker-sidecar")
 
 
 class DockerConnection(http.client.HTTPConnection):
@@ -54,14 +63,51 @@ class DockerConnection(http.client.HTTPConnection):
         self.sock.connect(SOCKET)
 
 
-def docker(method, path, timeout=20):
+def docker(method, path, timeout=20, body=None):
     conn = DockerConnection(timeout)
+    data = json.dumps(body).encode() if body is not None else b""
+    headers = {"Host": "localhost", "Content-Length": str(len(data))}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
     try:
-        conn.request(method, path, headers={"Host": "localhost", "Content-Length": "0"})
+        conn.request(method, path, body=data, headers=headers)
         res = conn.getresponse()
         return res.status, res.getheader("Content-Type", "application/json"), res.read()
     finally:
         conn.close()
+
+
+def demux(raw):
+    """Docker log frames: 8-byte header (stream, 0, 0, 0, size) then the payload."""
+    out, i = [], 0
+    while i + 8 <= len(raw):
+        size = int.from_bytes(raw[i + 4:i + 8], "big")
+        out.append(raw[i + 8:i + 8 + size])
+        i += 8 + size
+    return b"".join(out).decode("utf-8", "replace")
+
+
+def run_watchtower(name):
+    """Returns {"exitCode", "log"} like MediaOps' local update does."""
+    status, _, raw = docker("POST", f"/images/create?fromImage={WATCHTOWER_IMAGE.replace('/', '%2F')}", timeout=180)
+    if status != 200:
+        raise RuntimeError(f"Pulling Watchtower failed: HTTP {status}")
+    status, _, raw = docker("POST", f"/containers/create?name=mediaops-update-{os.getpid()}-{os.urandom(3).hex()}", body={
+        "Image": WATCHTOWER_IMAGE,
+        "Cmd": ["--run-once", "--cleanup", name],
+        "HostConfig": {"Binds": [f"{SOCKET}:/var/run/docker.sock"]},
+    })
+    if status != 201:
+        raise RuntimeError(f"Creating the Watchtower container failed: HTTP {status}")
+    cid = json.loads(raw)["Id"]
+    try:
+        docker("POST", f"/containers/{cid}/start")
+        _, _, raw = docker("POST", f"/containers/{cid}/wait", timeout=15 * 60)
+        code = json.loads(raw).get("StatusCode", -1)
+        _, _, logs = docker("GET", f"/containers/{cid}/logs?stdout=1&stderr=1")
+        return {"exitCode": code, "log": re.sub(r"\x1b\[[0-9;]*m", "", demux(logs))}
+    finally:
+        docker("DELETE", f"/containers/{cid}?force=1")
 
 
 def only(params, allowed):
@@ -116,6 +162,20 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(rf"/containers/({NAME})/restart", path)
         if method == "POST" and m:
             return self.forward("POST", f"/containers/{m[1]}/restart?t=10", timeout=40)
+
+        m = re.fullmatch(rf"/containers/({NAME})/update", path)
+        if method == "POST" and m and not m[1].startswith("-"):
+            status, _, raw = docker("GET", f"/containers/{m[1]}/json")
+            if status != 200:
+                return self.error(404, "No such container")
+            name = json.loads(raw)["Name"].lstrip("/")
+            if name == SELF_NAME:
+                return self.error(409, "The sidecar can't update itself; run docker compose pull && docker compose up -d")
+            try:
+                result = run_watchtower(name)
+            except (OSError, RuntimeError, ValueError) as e:
+                return self.error(502, str(e))
+            return self.send(200, json.dumps(result).encode())
 
         return self.error(404, "Not found")
 

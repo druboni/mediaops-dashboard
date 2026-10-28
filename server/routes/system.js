@@ -148,7 +148,7 @@ async function getGlances(host, port = 61208, includeProcesses = false) {
 // target is null for this machine's own Docker socket, or a monitored server
 // running scripts/docker-sidecar.py ({ host, dockerPort, dockerToken }), which
 // forwards the same few Docker API paths over HTTP.
-function dockerRequest(target, method, path, timeout) {
+function dockerRequest(target, method, path, timeout, body = null) {
   if (target) {
     return fetch(`http://${target.host}:${target.dockerPort}${path}`, {
       method,
@@ -158,7 +158,12 @@ function dockerRequest(target, method, path, timeout) {
   }
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { socketPath: '/var/run/docker.sock', path, method, headers: { Host: 'localhost', 'Content-Length': 0 } },
+      {
+        socketPath: '/var/run/docker.sock', path, method,
+        headers: body
+          ? { Host: 'localhost', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+          : { Host: 'localhost', 'Content-Length': 0 },
+      },
       (res) => {
         const chunks = []
         res.on('data', (chunk) => chunks.push(chunk))
@@ -167,7 +172,7 @@ function dockerRequest(target, method, path, timeout) {
     )
     req.setTimeout(timeout, () => { req.destroy(new Error('Docker API timeout')) })
     req.on('error', reject)
-    req.end()
+    req.end(body ?? undefined)
   })
 }
 
@@ -190,6 +195,49 @@ async function dockerApiGet(target, path) {
 async function dockerApiPost(target, path) {
   const res = await dockerRequest(target, 'POST', path, 20000)
   if (res.status < 200 || res.status >= 300) throw dockerError(res)
+}
+
+// Updates one container the way Watchtower's nightly run would: a throwaway
+// Watchtower container pulls the image and recreates the container with the
+// same settings. scripts/docker-sidecar.py does the same steps on other servers.
+const WATCHTOWER_IMAGE = 'nickfedor/watchtower:latest'
+
+async function updateLocalContainer(name) {
+  const call = async (method, path, timeout, body) => {
+    const res = await dockerRequest(null, method, path, timeout, body ? JSON.stringify(body) : null)
+    if (res.status < 200 || res.status >= 300) throw dockerError(res)
+    return res.body.length ? JSON.parse(res.body.toString('utf8')) : null
+  }
+  // Pull streams progress as JSON lines; it's finished when the response ends.
+  const pull = await dockerRequest(null, 'POST', `/images/create?fromImage=${encodeURIComponent(WATCHTOWER_IMAGE)}`, 180_000)
+  if (pull.status !== 200) throw dockerError(pull)
+  const { Id } = await call('POST', `/containers/create?name=mediaops-update-${Date.now()}`, 10_000, {
+    Image: WATCHTOWER_IMAGE,
+    Cmd: ['--run-once', '--cleanup', name],
+    HostConfig: { Binds: ['/var/run/docker.sock:/var/run/docker.sock'] },
+  })
+  try {
+    await call('POST', `/containers/${Id}/start`, 10_000)
+    const { StatusCode } = await call('POST', `/containers/${Id}/wait`, 15 * 60_000)
+    const logs = await dockerRequest(null, 'GET', `/containers/${Id}/logs?stdout=1&stderr=1`, 10_000)
+    return { exitCode: StatusCode, log: (demuxDockerLogs(logs.body) ?? logs.body.toString('utf8')).replace(ANSI_RE, '') }
+  } finally {
+    await dockerRequest(null, 'DELETE', `/containers/${Id}?force=1`, 10_000).catch(() => {})
+  }
+}
+
+// Watchtower ends its run with e.g.
+//   msg="Update session completed" failed=0 notify=no scanned=1 skipped=0 updated=1
+function summarizeWatchtower({ exitCode, log }) {
+  const line = log.split('\n').reverse().find((l) => l.includes('Update session completed'))
+  const field = (name) => Number(line?.match(new RegExp(`\\b${name}=(\\d+)`, 'i'))?.[1])
+  const [failed, scanned, updated] = ['failed', 'scanned', 'updated'].map(field)
+  if (!line || [failed, scanned, updated].some(Number.isNaN)) {
+    return { ok: false, updated: false, message: exitCode ? `Watchtower exited with code ${exitCode}` : 'Watchtower did not report a result', log }
+  }
+  if (failed > 0) return { ok: false, updated: false, message: 'Watchtower could not update it — see the log', log }
+  if (scanned === 0) return { ok: false, updated: false, message: 'Watchtower skipped it (excluded or not found)', log }
+  return { ok: true, updated: updated > 0, message: updated > 0 ? 'Updated to the new image' : 'Already up to date', log }
 }
 
 async function dockerApiGetRaw(target, path) {
@@ -223,13 +271,15 @@ async function getDockerContainers(target = null) {
   try {
     const raw = await dockerApiGet(target, '/containers/json?all=1')
     if (!Array.isArray(raw)) return null
-    return raw
+    const list = raw
       .map((c) => ({
         id:     c.Id?.slice(0, 12) ?? '',
         name:   (c.Names?.[0] ?? '').replace(/^\//, ''),
         image:  (c.Image ?? '').replace(/^sha256:/, '').split(':')[0].split('/').pop(),
         state:  c.State  ?? 'unknown',   // 'running' | 'exited' | 'paused' | 'restarting' | ...
         status: c.Status ?? '',           // human string, e.g. "Up 3 hours"
+        fullId: c.Id ?? '',
+        networkOf: (c.HostConfig?.NetworkMode ?? '').startsWith('container:') ? c.HostConfig.NetworkMode.slice(10) : null,
         ports:  (c.Ports ?? [])
           .filter((p) => p.PublicPort)
           .map((p) => p.PublicPort)
@@ -242,6 +292,13 @@ async function getDockerContainers(target = null) {
         if (a.state === b.state) return a.name.localeCompare(b.name)
         return a.state === 'running' ? -1 : b.state === 'running' ? 1 : 0
       })
+    // Others run inside this one's network (network_mode: service:gluetun).
+    // Recreating it would leave them pointing at a container that's gone.
+    const parents = new Set(list.map((c) => c.networkOf).filter(Boolean))
+    return list.map(({ fullId, networkOf, ...c }) => ({
+      ...c,
+      sharedNetwork: parents.has(fullId) || parents.has(c.name),
+    }))
   } catch (err) {
     if (target) throw err
     return null  // socket not mounted / not available
@@ -449,6 +506,41 @@ export default async function systemRoutes(fastify) {
 
       return { updateAvailable: remoteDigest !== localDigest, localDigest, remoteDigest }
     } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
+  fastify.post('/containers/:id/update', async (request, reply) => {
+    const { id } = request.params
+    if (!/^[a-zA-Z0-9_.-]+$/.test(id)) return reply.status(400).send({ error: 'Invalid container id' })
+    const target = await dockerTarget(request, reply)
+    if (target === undefined) return reply
+    const where = target ? ` on ${target.name}` : ''
+    try {
+      const containers = await getDockerContainers(target)
+      const c = containers?.find((x) => x.id === id || x.name === id)
+      if (!c) return reply.status(404).send({ error: 'Container not found' })
+      if (c.sharedNetwork) {
+        return reply.status(409).send({ error: 'Other containers use its network; update it with docker compose so they are recreated too' })
+      }
+      addLog('info', `[system] Updating container ${c.name}${where}`, { container: c.name, server: target?.name })
+      let run
+      if (target) {
+        const res = await dockerRequest(target, 'POST', `/containers/${c.name}/update`, 16 * 60_000)
+        if (res.status !== 200) throw dockerError(res)
+        run = JSON.parse(res.body.toString('utf8'))
+      } else {
+        run = await updateLocalContainer(c.name)
+      }
+      const result = summarizeWatchtower(run)
+      addLog(result.ok ? 'info' : 'error', `[system] Update ${c.name}${where}: ${result.message}`, { container: c.name, server: target?.name })
+      return result
+    } catch (err) {
+      // fetch stops waiting for response headers after 5 minutes; the sidecar keeps going.
+      if (err.cause?.code === 'UND_ERR_HEADERS_TIMEOUT') {
+        return reply.status(504).send({ error: 'Still running on the server after 5 minutes. Check again shortly.' })
+      }
+      addLog('error', `[system] Failed to update container ${id}${where}: ${err.message}`, { container: id, server: target?.name, error: err.message })
       return reply.status(502).send({ error: err.message })
     }
   })

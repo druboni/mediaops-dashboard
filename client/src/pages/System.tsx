@@ -74,6 +74,7 @@ interface ContainerInfo {
   state: string
   status: string
   ports: number[]
+  sharedNetwork?: boolean   // other containers use its network (gluetun) — can't be recreated alone
 }
 
 interface RemoteContainers {
@@ -407,6 +408,22 @@ function ContainerSection({ title, containers, server, error }: {
     },
   })
 
+  // Pull + recreate through a one-off Watchtower run; can take a few minutes.
+  const [updateConfirm, setUpdateConfirm] = useState<string | null>(null)
+  const [updateOutcome, setUpdateOutcome] = useState<Record<string, { ok: boolean; message: string }>>({})
+  const updateContainer = useMutation({
+    mutationFn: async (id: string) =>
+      (await api.post<{ ok: boolean; updated: boolean; message: string }>(`/system/containers/${id}/update`, null, { params: { server } })).data,
+    onMutate: () => setUpdateConfirm(null),
+    onSuccess: (result, id) => {
+      setUpdateOutcome((prev) => ({ ...prev, [id]: { ok: result.ok, message: result.message } }))
+      if (result.ok) setUpdateResults((prev) => { const next = { ...prev }; delete next[id]; return next })
+      queryClient.invalidateQueries({ queryKey: ['system'] })
+    },
+    onError: (err: unknown, id) =>
+      setUpdateOutcome((prev) => ({ ...prev, [id]: { ok: false, message: extractErrorMessage(err) || 'Update failed' } })),
+  })
+
   const [logsTarget, setLogsTarget] = useState<{ id: string; name: string } | null>(null)
   const [updateResults, setUpdateResults] = useState<Record<string, { updateAvailable: boolean | null; reason?: string }>>({})
 
@@ -456,6 +473,40 @@ function ContainerSection({ title, containers, server, error }: {
                 {updateResults[c.id]?.updateAvailable === true && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-300 font-medium shrink-0">
                     Update available
+                  </span>
+                )}
+                {updateResults[c.id]?.updateAvailable === true && !c.sharedNetwork && (
+                  updateContainer.isPending && updateContainer.variables === c.id ? (
+                    <span className="text-[10px] text-blue-300 shrink-0 animate-pulse">Updating… (pulling the new image)</span>
+                  ) : updateConfirm === c.id ? (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => updateContainer.mutate(c.id)}
+                        className="text-[10px] px-2 py-0.5 rounded bg-yellow-700 hover:bg-yellow-600 text-white font-medium"
+                      >
+                        Recreate with new image
+                      </button>
+                      <button onClick={() => setUpdateConfirm(null)} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-400 hover:text-white">✕</button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setUpdateConfirm(c.id)}
+                      disabled={updateContainer.isPending}
+                      title="Pull the new image and recreate this container with the same settings (via a one-off Watchtower run)"
+                      className="text-[10px] px-2 py-0.5 rounded bg-yellow-800/70 hover:bg-yellow-700 text-yellow-100 font-medium shrink-0 disabled:opacity-50"
+                    >
+                      Update
+                    </button>
+                  )
+                )}
+                {updateResults[c.id]?.updateAvailable === true && c.sharedNetwork && (
+                  <span className="text-[10px] text-gray-600 truncate" title="Other containers use its network, so recreating it alone would cut them off">
+                    Update with docker compose
+                  </span>
+                )}
+                {updateOutcome[c.id] && (
+                  <span className={`text-[10px] truncate ${updateOutcome[c.id].ok ? 'text-green-400' : 'text-red-400'}`} title={updateOutcome[c.id].message}>
+                    {updateOutcome[c.id].message}
                   </span>
                 )}
                 {updateResults[c.id]?.updateAvailable === false && (
