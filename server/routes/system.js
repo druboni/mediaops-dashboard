@@ -494,6 +494,13 @@ export default async function systemRoutes(fastify) {
       const imageRef = info?.Config?.Image
       if (!imageRef) return reply.status(404).send({ error: 'Container not found' })
 
+      // A newer image already pulled (e.g. by docker compose pull) takes over the
+      // tag, leaving the running container on an untagged image with no digest.
+      const tagged = await dockerApiGet(target, `/images/${encodeURIComponent(imageRef)}/json`).catch(() => null)
+      if (tagged?.Id && tagged.Id !== info.Image) {
+        return { updateAvailable: true, reason: 'A newer image is already downloaded' }
+      }
+
       const imgInfo = await dockerApiGet(target, `/images/${encodeURIComponent(info.Image)}/json`)
       const repoDigests = imgInfo?.RepoDigests ?? []
       if (repoDigests.length === 0) {

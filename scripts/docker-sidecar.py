@@ -23,7 +23,7 @@ Every request needs "Authorization: Bearer <token>". Allowed:
     GET  /containers/json?all=1
     GET  /containers/{id}/json           (only Image and Config.Image)
     GET  /containers/{id}/logs?...       (stdout/stderr/tail/timestamps)
-    GET  /images/{id}/json               (only RepoDigests)
+    GET  /images/{id or ref}/json        (only Id and RepoDigests)
     POST /containers/{id}/restart?t=10
     POST /containers/{name}/update       (one-off Watchtower run for that container)
 Everything else is 404.
@@ -42,7 +42,7 @@ import re
 import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 SOCKET = os.environ.get("DOCKER_SOCKET", "/var/run/docker.sock")
 TOKEN = os.environ.get("DOCKER_SIDECAR_TOKEN", "")
@@ -152,12 +152,14 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and m:
             return self.forward("GET", f"/containers/{m[1]}/logs?{only(params, LOG_PARAMS)}")
 
-        m = re.fullmatch(rf"/images/({NAME}(?::[A-Za-z0-9]+)?)/json", path)
-        if method == "GET" and m:
-            status, _, raw = docker("GET", f"/images/{m[1]}/json")
+        # An image id (sha256:...) or a reference like lscr.io/linuxserver/radarr:latest.
+        m = re.fullmatch(r"/images/([A-Za-z0-9][A-Za-z0-9_.:/@-]*)/json", path)
+        if method == "GET" and m and ".." not in m[1]:
+            status, _, raw = docker("GET", f"/images/{quote(m[1], safe='')}/json")
             if status != 200:
                 return self.send(status, raw)
-            return self.send(200, json.dumps({"RepoDigests": json.loads(raw).get("RepoDigests", [])}).encode())
+            info = json.loads(raw)
+            return self.send(200, json.dumps({"Id": info.get("Id"), "RepoDigests": info.get("RepoDigests", [])}).encode())
 
         m = re.fullmatch(rf"/containers/({NAME})/restart", path)
         if method == "POST" and m:
