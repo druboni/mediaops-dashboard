@@ -275,7 +275,8 @@ async function getDockerContainers(target = null) {
       .map((c) => ({
         id:     c.Id?.slice(0, 12) ?? '',
         name:   (c.Names?.[0] ?? '').replace(/^\//, ''),
-        image:  (c.Image ?? '').replace(/^sha256:/, '').split(':')[0].split('/').pop(),
+        // A bare image id means its tag moved to a newer pull; the hash says nothing.
+        image:  /^(sha256:)?[0-9a-f]{64}$/.test(c.Image ?? '') ? '' : (c.Image ?? '').split(':')[0].split('/').pop(),
         state:  c.State  ?? 'unknown',   // 'running' | 'exited' | 'paused' | 'restarting' | ...
         status: c.Status ?? '',           // human string, e.g. "Up 3 hours"
         fullId: c.Id ?? '',
