@@ -32,7 +32,9 @@ const SERVICE_META: Record<ServiceName, ServiceMeta> = {
   audiobookRequester: { label: 'Audiobook Requester', category: 'Audiobooks', placeholder: 'http://192.168.1.x:5066', keyLabel: 'API Key (not needed)' },
   audiobookshelfDemo: { label: 'Audiobookshelf (Demo)', category: 'Audiobooks', placeholder: 'https://demo.example.com', keyLabel: 'API Key (not needed)' },
   homeshelfWeb: { label: 'Homeshelf Web', category: 'Audiobooks', placeholder: 'http://192.168.1.x:5067', keyLabel: 'API Key (not needed)' },
-  plexampRequester: { label: 'Plexamp Requester', category: 'Requests', placeholder: 'http://192.168.1.x:5065', keyLabel: 'API Key (not needed)' },
+  plexampRequester: { label: 'Plexamp Requester', category: 'Requests', placeholder: 'http://192.168.1.x:5065', keyLabel: 'Dashboard API Key (optional)' },
+  slskd:       { label: 'slskd (Soulseek)', category: 'Download Clients', placeholder: 'http://192.168.1.x:5030', keyLabel: 'API Key' },
+  soularr:     { label: 'Soularr',      category: 'Download Clients', placeholder: 'http://192.168.1.x:8265',  keyLabel: 'API Key (not needed)' },
   wizarr:      { label: 'Wizarr',       category: 'Utilities',        placeholder: 'http://192.168.1.x:5690',  keyLabel: 'API Key (not needed)' },
   huntarr:     { label: 'Huntarr',      category: 'Utilities',        placeholder: 'http://192.168.1.x:9705',  keyLabel: 'API Key' },
   requestrr:   { label: 'Requestrr',    category: 'Utilities',        placeholder: 'http://192.168.1.x:4545',  keyLabel: 'API Key' },
@@ -451,7 +453,9 @@ export default function Settings() {
           System page for that server — run{' '}
           <code className="text-gray-400">scripts/speedtest-sidecar.py</code> (from this repo) on the server
           itself and point this at that port, since testing a server's real internet speed has to happen from
-          that server, not from wherever MediaOps runs.
+          that server, not from wherever MediaOps runs. To list, restart and read logs of another server's Docker
+          containers, run <code className="text-gray-400">scripts/docker-sidecar.py</code> there and set its Docker
+          port and token (this machine's own containers always show up).
         </p>
         <MonitoredServersBlock servers={monitoredServers} onChange={setMonitoredServers} />
       </section>
@@ -1223,6 +1227,8 @@ function MonitoredServersBlock({
     name: '', host: '', glancesPort: '', gpuPort: '', speedtestPort: '',
   })
 
+  const [dockerEdit, setDockerEdit] = useState<{ id: string; port: string; token: string } | null>(null)
+
   const add = () => {
     if (!draft.name.trim() || !draft.host.trim()) return
     const id = crypto.randomUUID()
@@ -1245,7 +1251,15 @@ function MonitoredServersBlock({
             <span className="text-sm text-white shrink-0">{s.name}</span>
             <span className="text-xs text-gray-600 truncate flex-1 font-mono">
               {s.host}:{s.glancesPort ?? 61208}{s.gpuPort ? ` · GPU :${s.gpuPort}` : ''}{s.speedtestPort ? ` · Speedtest :${s.speedtestPort}` : ''}
+              {s.dockerPort && s.dockerToken ? ` · Docker :${s.dockerPort}` : ''}
             </span>
+            <button
+              onClick={() => setDockerEdit(dockerEdit?.id === s.id ? null : { id: s.id, port: s.dockerPort ? String(s.dockerPort) : '8767', token: s.dockerToken ?? '' })}
+              className="text-xs text-gray-500 hover:text-white transition-colors shrink-0"
+              title="Docker sidecar for this server's containers"
+            >
+              Docker
+            </button>
             <button
               onClick={() => onChange(servers.filter((x) => x.id !== s.id))}
               className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
@@ -1254,6 +1268,42 @@ function MonitoredServersBlock({
             </button>
           </div>
         ))}
+        {dockerEdit && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 flex gap-2 items-center flex-wrap">
+            <span className="text-xs text-gray-500 shrink-0">
+              Docker sidecar on {servers.find((x) => x.id === dockerEdit.id)?.name}
+            </span>
+            <input
+              type="number"
+              placeholder="Port (8767)"
+              value={dockerEdit.port}
+              onChange={(e) => setDockerEdit({ ...dockerEdit, port: e.target.value })}
+              className="input w-28"
+            />
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder="Token (DOCKER_SIDECAR_TOKEN)"
+              value={dockerEdit.token}
+              onChange={(e) => setDockerEdit({ ...dockerEdit, token: e.target.value })}
+              className="input flex-1 min-w-[12rem]"
+            />
+            <button
+              onClick={() => {
+                const port = dockerEdit.port ? Number(dockerEdit.port) : undefined
+                const token = dockerEdit.token.trim() || undefined
+                onChange(servers.map((x) => x.id === dockerEdit.id
+                  ? { ...x, dockerPort: token ? port : undefined, dockerToken: token }
+                  : x))
+                setDockerEdit(null)
+              }}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              Set
+            </button>
+            <span className="text-[11px] text-gray-600 basis-full">Clear the token to stop showing this server's containers. Save settings afterwards.</span>
+          </div>
+        )}
         {servers.length === 0 && (
           <p className="text-xs text-gray-600 py-1">No servers configured — the System page will be empty until you add one</p>
         )}

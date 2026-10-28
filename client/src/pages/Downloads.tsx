@@ -17,9 +17,12 @@ const QBIT_CLIENTS = [
   { key: 'qbittorrentMam', label: 'qBittorrent (MAM)', short: 'qBit MAM' },
 ] as const
 type QbitClient = typeof QBIT_CLIENTS[number]['key']
-type DownloadClient = QbitClient | NzbClient
+// slskd (Soulseek, fed by Soularr): one item per album folder. It can't pause,
+// and removing only cancels/clears the transfer, never touches imported files.
+const SLSKD = { key: 'slskd', label: 'Soulseek', short: 'Soulseek' } as const
+type DownloadClient = QbitClient | NzbClient | 'slskd'
 const isQbit = (c: DownloadClient): c is QbitClient => QBIT_CLIENTS.some((q) => q.key === c)
-const clientMeta = (c: DownloadClient) => [...QBIT_CLIENTS, ...NZB_CLIENTS].find((x) => x.key === c)!
+const clientMeta = (c: DownloadClient) => [...QBIT_CLIENTS, ...NZB_CLIENTS, SLSKD].find((x) => x.key === c)!
 type ArrService = 'sonarr' | 'radarr' | 'lidarr'
 
 interface DownloadItem {
@@ -61,7 +64,7 @@ interface DownloadsData {
   arrQueueOk: boolean        // false if any arr's queue couldn't be read (hashes incomplete)
   replaceDeadTorrents?: boolean // server replaces dead torrents through the *arrs
   arrCategories: string[]    // qBittorrent categories the arrs use — the sweep touches nothing else
-  limits: Record<QbitClient, { speedLimitMode: number } | null> & Record<NzbClient, { speedLimit: number } | null>
+  limits: Record<QbitClient, { speedLimitMode: number } | null> & Record<NzbClient, { speedLimit: number } | null> & { slskd?: null }
   errors: Record<DownloadClient, string | null>
 }
 
@@ -117,7 +120,8 @@ function statusColor(status: string): string {
   if (status === 'processing') return 'text-purple-400'
   if (status === 'stalled' || status === 'finding peers') return 'text-orange-400'
   if (status === 'success') return 'text-green-500'
-  if (status === 'failure' || status === 'deleted') return 'text-red-500'
+  if (status === 'failure' || status === 'deleted' || status === 'failed') return 'text-red-500'
+  if (status === 'completed') return 'text-green-500'
   return 'text-gray-400'
 }
 
@@ -127,6 +131,7 @@ function ClientBadge({ client }: { client: DownloadClient }) {
       client === 'qbittorrent' ? 'bg-blue-900/60 text-blue-300'
         : client === 'qbittorrentMam' ? 'bg-teal-900/60 text-teal-300'
         : client === 'nzbgetMusic' ? 'bg-purple-900/60 text-purple-300'
+        : client === 'slskd' ? 'bg-pink-900/60 text-pink-300'
         : 'bg-green-900/60 text-green-300'
     }`}>
       {clientMeta(client)?.short ?? 'NZB'}
@@ -213,12 +218,14 @@ export default function Downloads() {
   const hasQbit = qbitClients.length > 0
   const nzbClients = NZB_CLIENTS.filter((c) => enabledServices.includes(c.key))
   const hasNzb = nzbClients.length > 0
+  const hasSlskd = enabledServices.includes('slskd')
+  const listClients = [...qbitClients, ...nzbClients, ...(hasSlskd ? [SLSKD] : [])]
 
   const { data, isLoading } = useQuery<DownloadsData>({
     queryKey: ['downloads'],
     queryFn: async () => (await api.get<DownloadsData>('/downloads')).data,
     refetchInterval: 10_000,
-    enabled: hasQbit || hasNzb,
+    enabled: hasQbit || hasNzb || hasSlskd,
   })
 
   const getImportStart = useImportingTimestamps(data?.importing)
@@ -276,6 +283,11 @@ export default function Downloads() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
 
+  const slskdAction = useMutation({
+    mutationFn: (id: string) => api.post('/downloads/slskd/action', { id, action: 'delete' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
+  })
+
   const clearImport = useMutation({
     mutationFn: (body: { service: ArrService; ids: string[] }) =>
       api.post('/downloads/clear-import', body),
@@ -318,7 +330,7 @@ export default function Downloads() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   })
 
-  if (!hasQbit && !hasNzb) {
+  if (!hasQbit && !hasNzb && !hasSlskd) {
     return (
       <div className="p-6">
         <h1 className="text-2xl font-bold text-white mb-4">Downloads</h1>
@@ -338,7 +350,9 @@ export default function Downloads() {
   })
 
   const handleAction = (item: DownloadItem, action: 'pause' | 'resume' | 'delete', deleteFiles = false) => {
-    if (isQbit(item.client)) {
+    if (item.client === 'slskd') {
+      if (action === 'delete') slskdAction.mutate(item.id)
+    } else if (isQbit(item.client)) {
       qbitAction.mutate({ client: item.client, hash: item.id, action, deleteFiles })
     } else {
       nzbAction.mutate({ client: item.client, id: item.id, action })
@@ -555,9 +569,9 @@ export default function Downloads() {
 
       {/* Filters + errors */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {qbitClients.length + nzbClients.length > 1 && (
+        {listClients.length > 1 && (
           <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
-            {(['all', ...qbitClients.map((c) => c.key), ...nzbClients.map((c) => c.key)] as const).map((f) => (
+            {(['all', ...listClients.map((c) => c.key)] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setClientFilter(f)}
@@ -581,7 +595,7 @@ export default function Downloads() {
             ))}
           </select>
         )}
-        {[...QBIT_CLIENTS, ...NZB_CLIENTS].map(({ key, label }) => data?.errors[key] && (
+        {[...QBIT_CLIENTS, ...NZB_CLIENTS, SLSKD].map(({ key, label }) => data?.errors[key] && (
           <span key={key} className="text-xs text-red-400">{label}: {data.errors[key]}</span>
         ))}
       </div>
@@ -659,6 +673,9 @@ export default function Downloads() {
                   )}
                   <td className="px-4 py-3">
                     <span className={`text-xs capitalize ${statusColor(item.status)}`}>{item.status}</span>
+                    {item.client === 'slskd' && (
+                      <span className="block text-[11px] text-gray-500 truncate max-w-[12rem]" title={item.rawState}>{item.rawState}</span>
+                    )}
                     {item.dead && (
                       <span
                         className="block text-[11px] text-gray-500"
@@ -672,13 +689,15 @@ export default function Downloads() {
                   <td className="px-4 py-3">
                     {tab === 'queue' && (
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
-                        <button
-                          onClick={() => handleAction(item, isPaused(item) ? 'resume' : 'pause')}
-                          disabled={qbitAction.isPending || nzbAction.isPending}
-                          className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors disabled:opacity-50"
-                        >
-                          {isPaused(item) ? 'Resume' : 'Pause'}
-                        </button>
+                        {item.client !== 'slskd' && (
+                          <button
+                            onClick={() => handleAction(item, isPaused(item) ? 'resume' : 'pause')}
+                            disabled={qbitAction.isPending || nzbAction.isPending}
+                            className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors disabled:opacity-50"
+                          >
+                            {isPaused(item) ? 'Resume' : 'Pause'}
+                          </button>
+                        )}
                         <button
                           onClick={() => setDeleteTarget(item)}
                           className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-red-700 text-gray-300 transition-colors"

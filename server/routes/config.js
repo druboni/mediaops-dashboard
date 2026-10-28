@@ -50,6 +50,8 @@ const DEFAULT_CONFIG = {
     audiobookshelfDemo: { enabled: false, url: '', apiKey: '' },
     homeshelfWeb: { enabled: false, url: '', apiKey: '' },
     plexampRequester: { enabled: false, url: '', apiKey: '' },
+    slskd:       { enabled: false, url: '', apiKey: '' },
+    soularr:     { enabled: false, url: '', apiKey: '' },
     wizarr:      { enabled: false, url: '', apiKey: '' },
     huntarr:     { enabled: false, url: '', apiKey: '' },
     requestrr:   { enabled: false, url: '', apiKey: '' },
@@ -128,6 +130,9 @@ export async function getConfig() {
       inst.apiKey = decryptValue(inst.apiKey)
     }
   }
+  for (const server of merged.monitoredServers ?? []) {
+    if (server.dockerToken) server.dockerToken = decryptValue(server.dockerToken)
+  }
 
   return merged
 }
@@ -156,6 +161,9 @@ export async function saveConfig(config) {
     for (const inst of toWrite.additionalInstances?.[type] ?? []) {
       inst.apiKey = encryptValue(decryptValue(inst.apiKey))
     }
+  }
+  for (const server of toWrite.monitoredServers ?? []) {
+    if (server.dockerToken) server.dockerToken = encryptValue(decryptValue(server.dockerToken))
   }
   await mkdir(dirname(CONFIG_PATH), { recursive: true })
   await writeFile(CONFIG_PATH, JSON.stringify(toWrite, null, 2))

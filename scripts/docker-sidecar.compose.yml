@@ -1,0 +1,16 @@
+# Runs scripts/docker-sidecar.py as a container. Copy this file and
+# docker-sidecar.py into one folder on the server, put the token in a .env
+# file next to them (DOCKER_SIDECAR_TOKEN=..., mode 600), then:
+#   docker compose -f docker-sidecar.compose.yml up -d
+services:
+  docker-sidecar:
+    image: python:3.13-alpine
+    container_name: mediaops-docker-sidecar
+    restart: unless-stopped
+    network_mode: host
+    command: ["python3", "/app/docker-sidecar.py", "8767"]
+    environment:
+      - DOCKER_SIDECAR_TOKEN=${DOCKER_SIDECAR_TOKEN}
+    volumes:
+      - ./docker-sidecar.py:/app/docker-sidecar.py:ro
+      - /var/run/docker.sock:/var/run/docker.sock

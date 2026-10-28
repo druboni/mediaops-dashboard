@@ -19,6 +19,8 @@ export type ServiceName =
   | 'homeshelfWeb'
   | 'plexampRequester'
   | 'wizarr'
+  | 'slskd'
+  | 'soularr'
   | 'huntarr'
   | 'requestrr'
   | 'tautulli'
@@ -65,6 +67,8 @@ export interface MonitoredServer {
   glancesPort?: number
   gpuPort?: number
   speedtestPort?: number
+  dockerPort?: number
+  dockerToken?: string
 }
 
 export interface SpeedtestResult {

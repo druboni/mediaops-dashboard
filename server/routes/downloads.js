@@ -4,6 +4,7 @@ import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 import { deadReason } from '../deadTorrents.js'
 import { badFileLog } from '../badFiles.js'
+import { getSlskdDownloads, removeSlskdDownload } from '../slskd.js'
 
 function mapQbitState(state) {
   switch (state) {
@@ -341,18 +342,21 @@ export default async function downloadsRoutes(fastify) {
     const settled = await Promise.allSettled([
       ...QBIT_CLIENTS.map((c) => (on(c) ? getQbitData(at(c).url, at(c).key, c) : Promise.resolve(null))),
       ...NZB_CLIENTS.map((c) => (on(c) ? getNzbData(at(c).url, at(c).key, c) : Promise.resolve(null))),
+      on('slskd') ? getSlskdDownloads(at('slskd').url, at('slskd').key) : Promise.resolve(null),
       ...ARRS.map(arrQueue),
       ...ARRS.map(arrCats),
     ])
     const take = (n) => settled.splice(0, n)
     const qbitResults = take(QBIT_CLIENTS.length)
     const nzbResults = take(NZB_CLIENTS.length)
+    const [slskdResult] = take(1)
     const arrQueueResults = take(ARRS.length)
     const arrCatResults = take(ARRS.length)
 
     const value = (r) => (r.status === 'fulfilled' ? r.value : null)
     const qbits = qbitResults.map(value)
     const nzbs = nzbResults.map(value)
+    const slskd = value(slskdResult) ?? []
     const arrs = arrQueueResults.map((r) => value(r) ?? { ok: false, importing: [], allHashes: new Set() })
     const cats = arrCatResults.map((r) => value(r) ?? { ok: false, categories: [] })
     const importing = arrs.flatMap((a) => a.importing)
@@ -376,15 +380,20 @@ export default async function downloadsRoutes(fastify) {
       limits[c] = on(c) ? { speedLimit: nzbs[i]?.speedLimit ?? 0 } : null
       errors[c] = nzbResults[i].status === 'rejected' ? nzbResults[i].reason?.message : null
     })
+    limits.slskd = null
+    errors.slskd = slskdResult.status === 'rejected' ? slskdResult.reason?.message : null
+    const slskdFinished = (i) => i.status === 'completed' || i.status === 'failed'
 
     return {
       queue: [
         ...qbits.flatMap((q) => q?.queue || []),
         ...nzbs.flatMap((n) => n?.queue || []),
+        ...slskd.filter((i) => !slskdFinished(i)),
       ].sort((a, b) => b.dlSpeed - a.dlSpeed),
       completed: [
         ...qbits.flatMap((q) => q?.completed || []),
         ...nzbs.flatMap((n) => n?.completed || []),
+        ...slskd.filter(slskdFinished).sort((a, b) => (b.endedAt ?? '').localeCompare(a.endedAt ?? '')).slice(0, 100),
       ],
       importing,
       arrQueueHashes,
@@ -426,6 +435,22 @@ export default async function downloadsRoutes(fastify) {
         signal: AbortSignal.timeout(5000),
       })
       if (!res.ok) return reply.status(502).send({ ok: false, error: `HTTP ${res.status}` })
+      return { ok: true }
+    } catch (err) {
+      return reply.status(502).send({ ok: false, error: err.message })
+    }
+  })
+
+  // slskd has no pause; the only action is cancel + remove from its list.
+  fastify.post('/slskd/action', async (request, reply) => {
+    const config = await getConfig()
+    const svc = config.services.slskd
+    if (!svc?.enabled) return reply.status(400).send({ error: 'slskd not enabled' })
+    const { id, action } = request.body ?? {}
+    if (typeof id !== 'string' || action !== 'delete') return reply.status(400).send({ error: 'id and action "delete" required' })
+    try {
+      const item = await removeSlskdDownload(svc.url.replace(/\/$/, ''), svc.apiKey, id)
+      addLog('info', `[downloads] Removed slskd download ${item.name}`, { client: 'slskd', name: item.name, status: item.status })
       return { ok: true }
     } catch (err) {
       return reply.status(502).send({ ok: false, error: err.message })

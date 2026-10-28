@@ -62,8 +62,13 @@ const TEST_ENDPOINT = {
   audiobookRequester: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
   audiobookshelfDemo: (url) => ({ url: `${url}/status`, headers: {}, expectJson: true }),
   homeshelfWeb: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
-  plexampRequester: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
+  // With the dashboard key, check it against /api/stats; without, just reachability.
+  plexampRequester: (url, key) => key
+    ? { url: `${url}/api/stats`, headers: { 'X-Api-Key': key }, expectJson: true }
+    : { url: `${url}/api/ping`, headers: {}, expectJson: true },
   wizarr:    (url)      => ({ url: `${url}/`,                     headers: {} }),
+  slskd:     (url, key) => ({ url: `${url}/api/v0/application`, headers: { 'X-API-Key': key }, expectJson: true }),
+  soularr:   (url)      => ({ url: `${url}/`,                     headers: {} }),
   huntarr:   (url, key) => ({ url: `${url}/api/v1/system/status`, headers: { 'X-Api-Key': key } }),
   requestrr: (url)      => ({ url: `${url}/`,                     headers: {} }),
   tautulli:  (url, key) => ({ url: `${url}/api/v2?apikey=${encodeURIComponent(key)}&cmd=get_server_info`, headers: {} }),

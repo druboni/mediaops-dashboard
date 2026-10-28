@@ -145,64 +145,57 @@ async function getGlances(host, port = 61208, includeProcesses = false) {
   }
 }
 
-function dockerApiGet(path) {
-  return new Promise((resolve, reject) => {
-    const req = http.get(
-      { socketPath: '/var/run/docker.sock', path, headers: { Host: 'localhost' } },
-      (res) => {
-        let raw = ''
-        res.on('data', (chunk) => { raw += chunk })
-        res.on('end', () => {
-          try { resolve(JSON.parse(raw)) }
-          catch { reject(new Error('Docker API: invalid JSON')) }
-        })
-      }
-    )
-    req.setTimeout(5000, () => { req.destroy(new Error('Docker API timeout')) })
-    req.on('error', reject)
-  })
-}
-
-function dockerApiPost(path) {
+// target is null for this machine's own Docker socket, or a monitored server
+// running scripts/docker-sidecar.py ({ host, dockerPort, dockerToken }), which
+// forwards the same few Docker API paths over HTTP.
+function dockerRequest(target, method, path, timeout) {
+  if (target) {
+    return fetch(`http://${target.host}:${target.dockerPort}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${target.dockerToken}` },
+      signal: AbortSignal.timeout(timeout),
+    }).then(async (res) => ({ status: res.status, body: Buffer.from(await res.arrayBuffer()) }))
+  }
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { socketPath: '/var/run/docker.sock', path, method: 'POST', headers: { Host: 'localhost', 'Content-Length': 0 } },
+      { socketPath: '/var/run/docker.sock', path, method, headers: { Host: 'localhost', 'Content-Length': 0 } },
       (res) => {
-        let raw = ''
-        res.on('data', (chunk) => { raw += chunk })
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) return resolve()
-          let msg = `Docker API HTTP ${res.statusCode}`
-          try {
-            const parsed = JSON.parse(raw)
-            if (parsed.message) msg = parsed.message
-          } catch { /* non-JSON error body */ }
-          reject(new Error(msg))
-        })
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }))
       }
     )
-    req.setTimeout(20000, () => { req.destroy(new Error('Docker API timeout')) })
+    req.setTimeout(timeout, () => { req.destroy(new Error('Docker API timeout')) })
     req.on('error', reject)
     req.end()
   })
 }
 
-function dockerApiGetRaw(path) {
-  return new Promise((resolve, reject) => {
-    const req = http.get(
-      { socketPath: '/var/run/docker.sock', path, headers: { Host: 'localhost' } },
-      (res) => {
-        const chunks = []
-        res.on('data', (chunk) => chunks.push(chunk))
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) return resolve(Buffer.concat(chunks))
-          reject(new Error(`Docker API HTTP ${res.statusCode}`))
-        })
-      }
-    )
-    req.setTimeout(10000, () => { req.destroy(new Error('Docker API timeout')) })
-    req.on('error', reject)
-  })
+function dockerError({ status, body }) {
+  let msg = `Docker API HTTP ${status}`
+  try {
+    const parsed = JSON.parse(body.toString('utf8'))
+    if (parsed.message) msg = parsed.message
+  } catch { /* non-JSON error body */ }
+  return new Error(msg)
+}
+
+async function dockerApiGet(target, path) {
+  const res = await dockerRequest(target, 'GET', path, 5000)
+  if (target && res.status >= 400) throw dockerError(res)
+  try { return JSON.parse(res.body.toString('utf8')) }
+  catch { throw new Error('Docker API: invalid JSON') }
+}
+
+async function dockerApiPost(target, path) {
+  const res = await dockerRequest(target, 'POST', path, 20000)
+  if (res.status < 200 || res.status >= 300) throw dockerError(res)
+}
+
+async function dockerApiGetRaw(target, path) {
+  const res = await dockerRequest(target, 'GET', path, 10000)
+  if (res.status < 200 || res.status >= 300) throw new Error(`Docker API HTTP ${res.status}`)
+  return res.body
 }
 
 // Docker multiplexes stdout/stderr into 8-byte-header frames unless the
@@ -226,9 +219,9 @@ function demuxDockerLogs(buf) {
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g
 
-async function getDockerContainers() {
+async function getDockerContainers(target = null) {
   try {
-    const raw = await dockerApiGet('/containers/json?all=1')
+    const raw = await dockerApiGet(target, '/containers/json?all=1')
     if (!Array.isArray(raw)) return null
     return raw
       .map((c) => ({
@@ -249,10 +242,13 @@ async function getDockerContainers() {
         if (a.state === b.state) return a.name.localeCompare(b.name)
         return a.state === 'running' ? -1 : b.state === 'running' ? 1 : 0
       })
-  } catch {
+  } catch (err) {
+    if (target) throw err
     return null  // socket not mounted / not available
   }
 }
+
+const hasDockerSidecar = (s) => !!(s.dockerPort && s.dockerToken)
 
 async function getGpu(host, port) {
   try {
@@ -366,23 +362,52 @@ export default async function systemRoutes(fastify) {
       getDockerContainers(),
     ])
 
+    // Other servers' containers, through their Docker sidecars.
+    const remoteContainers = await Promise.all(
+      monitored.filter(hasDockerSidecar).map(async (s) => {
+        try {
+          return { serverId: s.id, name: s.name, host: s.host, containers: await getDockerContainers(s), error: null }
+        } catch (err) {
+          return { serverId: s.id, name: s.name, host: s.host, containers: null, error: err.message }
+        }
+      })
+    )
+
     return {
       servers: serverResults.status === 'fulfilled'
         ? serverResults.value.map((r) => (r.status === 'fulfilled' ? r.value : null)).filter(Boolean)
         : [],
       containers: containers.status === 'fulfilled' ? containers.value : null,
+      remoteContainers,
     }
   })
+
+  // ?server=<monitored server id> targets that server's Docker sidecar; no
+  // server means this machine's own socket. Returns undefined after replying 404.
+  async function dockerTarget(request, reply) {
+    const { server } = request.query
+    if (!server) return null
+    const config = await getConfig()
+    const s = (config.monitoredServers ?? []).find((x) => x.id === server)
+    if (!s || !hasDockerSidecar(s)) {
+      reply.status(404).send({ error: 'That server has no Docker sidecar configured' })
+      return undefined
+    }
+    return s
+  }
 
   fastify.post('/containers/:id/restart', async (request, reply) => {
     const { id } = request.params
     if (!/^[a-zA-Z0-9_.-]+$/.test(id)) return reply.status(400).send({ error: 'Invalid container id' })
+    const target = await dockerTarget(request, reply)
+    if (target === undefined) return reply
+    const where = target ? ` on ${target.name}` : ''
     try {
-      await dockerApiPost(`/containers/${id}/restart?t=10`)
-      addLog('info', `[system] Restarted container ${id}`, { container: id })
+      await dockerApiPost(target, `/containers/${id}/restart?t=10`)
+      addLog('info', `[system] Restarted container ${id}${where}`, { container: id, server: target?.name })
       return { ok: true }
     } catch (err) {
-      addLog('error', `[system] Failed to restart container ${id}: ${err.message}`, { container: id, error: err.message })
+      addLog('error', `[system] Failed to restart container ${id}${where}: ${err.message}`, { container: id, server: target?.name, error: err.message })
       return reply.status(502).send({ error: err.message })
     }
   })
@@ -391,8 +416,10 @@ export default async function systemRoutes(fastify) {
     const { id } = request.params
     if (!/^[a-zA-Z0-9_.-]+$/.test(id)) return reply.status(400).send({ error: 'Invalid container id' })
     const tail = Math.min(parseInt(request.query.tail) || 300, 2000)
+    const target = await dockerTarget(request, reply)
+    if (target === undefined) return reply
     try {
-      const buf = await dockerApiGetRaw(`/containers/${id}/logs?stdout=1&stderr=1&tail=${tail}&timestamps=1`)
+      const buf = await dockerApiGetRaw(target, `/containers/${id}/logs?stdout=1&stderr=1&tail=${tail}&timestamps=1`)
       const text = demuxDockerLogs(buf) ?? buf.toString('utf8')
       return { logs: text.replace(ANSI_RE, '') }
     } catch (err) {
@@ -403,12 +430,14 @@ export default async function systemRoutes(fastify) {
   fastify.get('/containers/:id/update-check', async (request, reply) => {
     const { id } = request.params
     if (!/^[a-zA-Z0-9_.-]+$/.test(id)) return reply.status(400).send({ error: 'Invalid container id' })
+    const target = await dockerTarget(request, reply)
+    if (target === undefined) return reply
     try {
-      const info = await dockerApiGet(`/containers/${id}/json`)
+      const info = await dockerApiGet(target, `/containers/${id}/json`)
       const imageRef = info?.Config?.Image
       if (!imageRef) return reply.status(404).send({ error: 'Container not found' })
 
-      const imgInfo = await dockerApiGet(`/images/${encodeURIComponent(info.Image)}/json`)
+      const imgInfo = await dockerApiGet(target, `/images/${encodeURIComponent(info.Image)}/json`)
       const repoDigests = imgInfo?.RepoDigests ?? []
       if (repoDigests.length === 0) {
         return { updateAvailable: null, reason: 'Locally built image — nothing upstream to compare against' }

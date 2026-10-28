@@ -25,6 +25,7 @@ interface DashboardData {
     qbittorrentMam?: { ok: boolean; dlSpeed: number; upSpeed: number; active: number } | null
     nzbget:      { ok: boolean; dlSpeed: number; active: number } | null
     nzbgetMusic: { ok: boolean; dlSpeed: number; active: number } | null
+    slskd?:      { ok: boolean; dlSpeed: number; active: number } | null
   }
   plexStreams: {
     title: string; user: string; player: string; platform: string | null; state: string
@@ -41,9 +42,24 @@ interface DashboardData {
     reportedBy: string; createdAt: string | null
     problemSeason: number; problemEpisode: number; commentCount: number
   }[]
+  musicRequests?: MusicRequests | { error: string } | null
 }
 
-type DlClient = 'qbittorrent' | 'qbittorrentMam' | 'nzbget' | 'nzbgetMusic'
+// Plexamp Requester's /api/stats.
+interface MusicRequests {
+  counts: Record<'pending' | 'approved' | 'processing' | 'available' | 'declined' | 'failed', number>
+  total: number
+  completed: { day: number; week: number }
+  stages: Record<'searching' | 'downloading' | 'importing' | 'stuck', number>
+  issues: number | null
+  attention: {
+    id: number; artist: string; albums: string[] | null; user: string
+    status: string; stage: 'searching' | 'downloading' | 'importing' | 'stuck' | null
+    problem: string | null; createdAt: string
+  }[]
+}
+
+type DlClient = 'qbittorrent' | 'qbittorrentMam' | 'nzbget' | 'nzbgetMusic' | 'slskd'
 
 // Short badge text + colour for a download's client.
 const CLIENT_BADGE: Record<DlClient, [string, string]> = {
@@ -51,6 +67,7 @@ const CLIENT_BADGE: Record<DlClient, [string, string]> = {
   qbittorrentMam: ['qBit MAM', 'bg-teal-900/60 text-teal-300'],
   nzbget: ['NZB', 'bg-orange-900/60 text-orange-300'],
   nzbgetMusic: ['NZB Music', 'bg-orange-900/60 text-orange-300'],
+  slskd: ['Soulseek', 'bg-pink-900/60 text-pink-300'],
 }
 
 interface QueueItem {
@@ -105,6 +122,7 @@ const SERVICE_LABELS: Partial<Record<ServiceName, string>> = {
   audiobookshelf: 'Audiobookshelf', audiobookRequester: 'Audiobook Requester',
   audiobookshelfDemo: 'Audiobookshelf (Demo)', homeshelfWeb: 'Homeshelf Web',
   plexampRequester: 'Plexamp Requester', wizarr: 'Wizarr',
+  slskd: 'slskd', soularr: 'Soularr',
 }
 
 // ── Hooks ──────────────────────────────────────────────────────────────
@@ -379,7 +397,7 @@ export default function Dashboard() {
         )}
 
       {/* Download clients overview */}
-      {(data.downloads.qbittorrent || data.downloads.qbittorrentMam || data.downloads.nzbget || data.downloads.nzbgetMusic) && (
+      {(data.downloads.qbittorrent || data.downloads.qbittorrentMam || data.downloads.nzbget || data.downloads.nzbgetMusic || data.downloads.slskd) && (
         <section className="mb-8">
           <h2 className="section-label">Downloads</h2>
           <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
@@ -387,12 +405,16 @@ export default function Dashboard() {
             {data.downloads.qbittorrentMam && <DownloadRow label="qBittorrent (MAM)" {...data.downloads.qbittorrentMam} />}
             {data.downloads.nzbget      && <DownloadRow label="NZBGet"      {...data.downloads.nzbget} />}
             {data.downloads.nzbgetMusic && <DownloadRow label="NZBGet (Music)" {...data.downloads.nzbgetMusic} />}
+            {data.downloads.slskd       && <DownloadRow label="Soulseek (slskd)" {...data.downloads.slskd} />}
           </div>
         </section>
       )}
 
       {/* Active Downloads */}
       <ActiveDownloads data={downloadsData} />
+
+      {/* Music requests from Plexamp Requester */}
+      {data.musicRequests && <MusicRequestsSection data={data.musicRequests} />}
 
       {/* Reported Issues — someone told us something is broken */}
       {data.openIssues.length > 0 && (
@@ -518,6 +540,84 @@ export default function Dashboard() {
         </section>
       )}
     </div>
+  )
+}
+
+// ── Music requests ─────────────────────────────────────────────────────
+const STAGE_STYLE: Record<string, [string, string]> = {
+  failed:    ['Failed',    'bg-red-900/60 text-red-300'],
+  stuck:     ['Stuck',     'bg-yellow-900/60 text-yellow-300'],
+  searching: ['Searching', 'bg-gray-800 text-gray-400'],
+}
+
+// Plexamp Requester stores SQLite datetimes: UTC, "YYYY-MM-DD HH:MM:SS".
+const daysSince = (sqlite: string) => Math.floor((Date.now() - new Date(`${sqlite.replace(' ', 'T')}Z`).getTime()) / 86_400_000)
+
+function MusicRequestsSection({ data }: { data: MusicRequests | { error: string } }) {
+  const [showAll, setShowAll] = useState(false)
+  if ('error' in data) {
+    return (
+      <section className="mb-8">
+        <h2 className="section-label">Music Requests</h2>
+        <p className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-xs text-red-400">{data.error}</p>
+      </section>
+    )
+  }
+  const { counts, stages, completed } = data
+  const tiles: [string, number, string?][] = [
+    ['Searching', stages.searching],
+    ['Downloading', stages.downloading + stages.importing, 'text-green-400'],
+    ['Stuck', stages.stuck, 'text-yellow-400'],
+    ['Failed', counts.failed, 'text-red-400'],
+    ['Awaiting approval', counts.pending, 'text-blue-400'],
+    ['Done today', completed.day],
+    ['Done this week', completed.week],
+    ['Available', counts.available],
+  ]
+  const shown = showAll ? data.attention : data.attention.slice(0, 6)
+  return (
+    <section className="mb-8">
+      <div className="flex items-baseline justify-between">
+        <h2 className="section-label">Music Requests</h2>
+        <span className="text-xs text-gray-600">{data.total.toLocaleString()} total</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-3">
+        {tiles.map(([label, n, color]) => (
+          <div key={label} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+            <p className={`text-xl font-bold tabular-nums ${n && color ? color : 'text-white'}`}>{n.toLocaleString()}</p>
+            <p className="text-[11px] text-gray-500">{label}</p>
+          </div>
+        ))}
+      </div>
+      {data.attention.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+          {shown.map((r) => {
+            const [label, style] = STAGE_STYLE[r.status === 'failed' ? 'failed' : r.stage ?? 'searching'] ?? STAGE_STYLE.searching
+            const days = daysSince(r.createdAt)
+            const what = r.albums ? (r.albums.length === 1 ? r.albums[0] : `${r.albums.length} albums`) : 'Discography'
+            return (
+              <div key={r.id} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded font-medium ${style}`}>{label}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm text-white truncate" title={r.albums?.join(', ')}>
+                      {r.artist} <span className="text-gray-500">· {what}</span>
+                    </p>
+                    {r.problem && <p className="text-xs text-gray-500 truncate">{r.problem}</p>}
+                  </div>
+                </div>
+                <span className="text-xs text-gray-600 shrink-0">{r.user} · {days < 1 ? 'today' : `${days}d`}</span>
+              </div>
+            )
+          })}
+          {data.attention.length > 6 && (
+            <button onClick={() => setShowAll((v) => !v)} className="w-full px-4 py-2 text-xs text-gray-500 hover:text-white text-left">
+              {showAll ? 'Show fewer' : `Show ${data.attention.length - 6} more`}
+            </button>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 

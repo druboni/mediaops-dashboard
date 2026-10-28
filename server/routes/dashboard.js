@@ -4,6 +4,7 @@ import { getConfig } from './config.js'
 import { enrichWithTitles } from './overseerr.js'
 import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
+import { getSlskdDashboard } from '../slskd.js'
 
 // See server/routes/health.js for the full explanation — same optional mount path.
 const PLEX_MOUNT_PATH = process.env.PLEX_MOUNT_PATH || '/mnt/plex'
@@ -169,6 +170,16 @@ async function getJsonHealth(url, path, headers = {}, extractVersion = null) {
   if (typeof r.data !== 'object' || r.data === null) return { health: { ok: false, error: 'Not an API response — check the URL' } }
   const version = extractVersion ? extractVersion(r.data) : null
   return { health: { ok: true, ...(version ? { version } : {}) } }
+}
+
+// Plexamp Requester's /api/stats needs the dashboard key from its Settings page.
+// Without one there's nothing to show beyond the /api/ping health check.
+async function getMusicRequests(url, key) {
+  if (!key) return null
+  const r = await safeFetch(`${url}/api/stats`, { headers: { 'X-Api-Key': key } }, 10_000)
+  if (!r.ok) return { error: r.error === 'HTTP 401' ? 'API key rejected — copy it again from Plexamp Requester → Settings' : r.error }
+  if (typeof r.data !== 'object' || !r.data?.counts) return { error: 'This Plexamp Requester is too old for request stats (needs v0.8.0)' }
+  return r.data
 }
 
 // 0=other, 1=video, 2=audio, 3=subtitles, 4=not available — matches the labels
@@ -359,7 +370,7 @@ export default async function dashboardRoutes(fastify) {
 
     const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, nzbgetMusic, huntarr, requestrr, tautulli, plexDisk,
       qbitMam, listenarr, listenarrMam, audiobookshelf, audiobookRequester,
-      audiobookshelfDemo, homeshelfWeb, plexampRequester, wizarr] =
+      audiobookshelfDemo, homeshelfWeb, plexampRequester, wizarr, slskd, soularr, musicRequests] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -385,6 +396,9 @@ export default async function dashboardRoutes(fastify) {
         on('homeshelfWeb') ? getJsonHealth(at('homeshelfWeb').url, '/api/ping', {}, d => d?.version) : null,
         on('plexampRequester') ? getJsonHealth(at('plexampRequester').url, '/api/ping', {}, d => d?.version) : null,
         on('wizarr')       ? getSimpleHealth(at('wizarr').url, '/')                       : null,
+        on('slskd')        ? getSlskdDashboard(at('slskd').url, at('slskd').key)          : null,
+        on('soularr')      ? getSimpleHealth(at('soularr').url, '/')                      : null,
+        on('plexampRequester') ? getMusicRequests(at('plexampRequester').url, at('plexampRequester').key) : null,
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
@@ -403,6 +417,7 @@ export default async function dashboardRoutes(fastify) {
     addHealth('audiobookshelf', audiobookshelf); addHealth('audiobookRequester', audiobookRequester)
     addHealth('audiobookshelfDemo', audiobookshelfDemo); addHealth('homeshelfWeb', homeshelfWeb)
     addHealth('plexampRequester', plexampRequester); addHealth('wizarr', wizarr)
+    addHealth('slskd', slskd); addHealth('soularr', soularr)
 
     addLog('debug', '[dashboard] poll complete', {
       service: 'dashboard',
@@ -429,6 +444,7 @@ export default async function dashboardRoutes(fastify) {
       ...(qbitMam?.recentlyDownloaded || []),
       ...(nzbget?.recentlyDownloaded || []),
       ...(nzbgetMusic?.recentlyDownloaded || []),
+      ...(slskd?.recentlyDownloaded || []),
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10)
 
     return {
@@ -451,6 +467,7 @@ export default async function dashboardRoutes(fastify) {
         qbittorrentMam: on('qbittorrentMam') && qbitMam ? { ok: qbitMam.health.ok, dlSpeed: qbitMam.dlSpeed, upSpeed: qbitMam.upSpeed, active: qbitMam.activeCount } : null,
         nzbget:      on('nzbget') && nzbget     ? { ok: nzbget.health.ok, dlSpeed: nzbget.dlSpeed, active: nzbget.activeCount }                  : null,
         nzbgetMusic: on('nzbgetMusic') && nzbgetMusic ? { ok: nzbgetMusic.health.ok, dlSpeed: nzbgetMusic.dlSpeed, active: nzbgetMusic.activeCount } : null,
+        slskd:       on('slskd') && slskd ? { ok: slskd.health.ok, dlSpeed: slskd.dlSpeed ?? 0, active: slskd.activeCount ?? 0 } : null,
       },
       plexStreams: plex?.streamDetails || [],
       recentlyAdded,
@@ -460,6 +477,7 @@ export default async function dashboardRoutes(fastify) {
       recentlyPlayed: mergeRecentlyPlayed(plex?.recentlyPlayed, tautulli?.recentlyPlayed),
       pendingRequests: overseerr?.pendingRequests || [],
       openIssues: overseerr?.openIssues || [],
+      musicRequests,
     }
   })
 }

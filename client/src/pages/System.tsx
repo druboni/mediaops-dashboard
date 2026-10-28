@@ -76,9 +76,18 @@ interface ContainerInfo {
   ports: number[]
 }
 
+interface RemoteContainers {
+  serverId: string
+  name: string
+  host: string
+  containers: ContainerInfo[] | null
+  error: string | null
+}
+
 interface SystemData {
   servers: ServerStats[]
   containers: ContainerInfo[] | null
+  remoteContainers?: RemoteContainers[]
 }
 
 function formatBytes(bytes: number): string {
@@ -338,10 +347,10 @@ function extractErrorMessage(err: unknown): string | undefined {
     : undefined
 }
 
-function LogsModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+function LogsModal({ id, name, server, onClose }: { id: string; name: string; server?: string; onClose: () => void }) {
   const { data, isLoading, error, refetch, isFetching } = useQuery<{ logs: string }>({
-    queryKey: ['container-logs', id],
-    queryFn: async () => (await api.get<{ logs: string }>(`/system/containers/${id}/logs`, { params: { tail: 300 } })).data,
+    queryKey: ['container-logs', server ?? 'local', id],
+    queryFn: async () => (await api.get<{ logs: string }>(`/system/containers/${id}/logs`, { params: { tail: 300, server } })).data,
   })
 
   return (
@@ -375,19 +384,18 @@ function LogsModal({ id, name, onClose }: { id: string; name: string; onClose: (
   )
 }
 
-export default function System() {
+function ContainerSection({ title, containers, server, error }: {
+  title: string
+  containers: ContainerInfo[] | null
+  server?: string        // monitored server id; undefined = this machine
+  error?: string | null
+}) {
   const queryClient = useQueryClient()
-  const { data, isLoading, error, dataUpdatedAt } = useQuery<SystemData>({
-    queryKey: ['system'],
-    queryFn: async () => (await api.get<SystemData>('/system')).data,
-    refetchInterval: 15_000,
-  })
-
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
   const [restartError, setRestartError] = useState<{ id: string; message: string } | null>(null)
 
   const restartContainer = useMutation({
-    mutationFn: (id: string) => api.post(`/system/containers/${id}/restart`),
+    mutationFn: (id: string) => api.post(`/system/containers/${id}/restart`, null, { params: { server } }),
     onSuccess: () => {
       setConfirmTarget(null)
       queryClient.invalidateQueries({ queryKey: ['system'] })
@@ -404,10 +412,139 @@ export default function System() {
 
   const checkUpdate = useMutation({
     mutationFn: async (id: string) =>
-      (await api.get<{ updateAvailable: boolean | null; reason?: string }>(`/system/containers/${id}/update-check`)).data,
+      (await api.get<{ updateAvailable: boolean | null; reason?: string }>(`/system/containers/${id}/update-check`, { params: { server } })).data,
     onSuccess: (result, id) => setUpdateResults((prev) => ({ ...prev, [id]: result })),
     onError: (err: unknown, id) =>
       setUpdateResults((prev) => ({ ...prev, [id]: { updateAvailable: null, reason: extractErrorMessage(err) || 'Check failed' } })),
+  })
+
+  if (!containers) {
+    return (
+      <section className="mb-6">
+        <h2 className="section-label">{title}</h2>
+        <div className="bg-gray-900 border border-red-900/60 rounded-lg px-4 py-3 text-xs text-red-400">
+          Couldn't reach the Docker sidecar{error ? `: ${error}` : ''}
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="section-label mb-0">{title}</h2>
+        <span className="text-xs text-gray-600">
+          {containers.filter(c => c.state === 'running').length} running
+          {containers.filter(c => c.state !== 'running').length > 0 &&
+            ` · ${containers.filter(c => c.state !== 'running').length} stopped`}
+        </span>
+      </div>
+      <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+        {containers.map((c) => {
+          const stateColor =
+            c.state === 'running'    ? 'bg-green-400' :
+            c.state === 'paused'     ? 'bg-yellow-400' :
+            c.state === 'restarting' ? 'bg-blue-400 animate-pulse' :
+                                       'bg-red-500'
+          const isRestarting = restartContainer.isPending && restartContainer.variables === c.id
+          return (
+            <div key={c.id} className="px-4 py-2.5 flex items-center gap-3 group">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRestarting ? 'bg-blue-400 animate-pulse' : stateColor}`} />
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                <span className="text-sm text-white font-medium truncate">{c.name}</span>
+                <span className="text-xs text-gray-600 truncate hidden sm:block">{c.image}</span>
+                {updateResults[c.id]?.updateAvailable === true && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-300 font-medium shrink-0">
+                    Update available
+                  </span>
+                )}
+                {updateResults[c.id]?.updateAvailable === false && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/40 text-green-400 font-medium shrink-0">
+                    Up to date
+                  </span>
+                )}
+                {updateResults[c.id]?.updateAvailable === null && (
+                  <span
+                    className="text-[10px] text-gray-600 truncate"
+                    title={updateResults[c.id]?.reason}
+                  >
+                    {updateResults[c.id]?.reason}
+                  </span>
+                )}
+                {restartError?.id === c.id && (
+                  <span className="text-xs text-red-400 truncate" title={restartError.message}>
+                    Restart failed: {restartError.message}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                {c.ports.length > 0 && (
+                  <span className="text-xs text-gray-600 font-mono hidden md:block">
+                    :{c.ports.join(' :')}
+                  </span>
+                )}
+                <span className={`text-xs tabular-nums ${
+                  c.state === 'running' ? 'text-gray-500' : 'text-red-400'
+                }`}>
+                  {isRestarting ? 'Restarting…' : c.status}
+                </span>
+                <button
+                  onClick={() => checkUpdate.mutate(c.id)}
+                  disabled={checkUpdate.isPending && checkUpdate.variables === c.id}
+                  title="Check for a newer image on the registry"
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                >
+                  {checkUpdate.isPending && checkUpdate.variables === c.id ? '…' : 'Check update'}
+                </button>
+                <button
+                  onClick={() => setLogsTarget({ id: c.id, name: c.name })}
+                  title="View recent logs"
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                >
+                  Logs
+                </button>
+                {confirmTarget === c.id ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => restartContainer.mutate(c.id)}
+                      className="text-xs px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setConfirmTarget(null)}
+                      className="text-xs px-1.5 py-1 rounded bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmTarget(c.id)}
+                    disabled={isRestarting}
+                    title="Restart container"
+                    className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-blue-900/60 text-gray-500 hover:text-blue-300 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                  >
+                    Restart
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {logsTarget && (
+        <LogsModal id={logsTarget.id} name={logsTarget.name} server={server} onClose={() => setLogsTarget(null)} />
+      )}
+    </section>
+  )
+}
+
+export default function System() {
+  const { data, isLoading, error, dataUpdatedAt } = useQuery<SystemData>({
+    queryKey: ['system'],
+    queryFn: async () => (await api.get<SystemData>('/system')).data,
+    refetchInterval: 15_000,
   })
 
   function timeAgo(ts: number) {
@@ -467,119 +604,25 @@ export default function System() {
             </div>
           )}
 
-          {/* Docker Containers */}
+          {/* Docker Containers: this machine's, then each server with a Docker sidecar */}
           {data.containers && (
-            <section>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="section-label mb-0">Docker Containers</h2>
-                <span className="text-xs text-gray-600">
-                  {data.containers.filter(c => c.state === 'running').length} running
-                  {data.containers.filter(c => c.state !== 'running').length > 0 &&
-                    ` · ${data.containers.filter(c => c.state !== 'running').length} stopped`}
-                </span>
-              </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
-                {data.containers.map((c) => {
-                  const stateColor =
-                    c.state === 'running'    ? 'bg-green-400' :
-                    c.state === 'paused'     ? 'bg-yellow-400' :
-                    c.state === 'restarting' ? 'bg-blue-400 animate-pulse' :
-                                               'bg-red-500'
-                  const isRestarting = restartContainer.isPending && restartContainer.variables === c.id
-                  return (
-                    <div key={c.id} className="px-4 py-2.5 flex items-center gap-3 group">
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRestarting ? 'bg-blue-400 animate-pulse' : stateColor}`} />
-                      <div className="flex-1 min-w-0 flex items-center gap-3">
-                        <span className="text-sm text-white font-medium truncate">{c.name}</span>
-                        <span className="text-xs text-gray-600 truncate hidden sm:block">{c.image}</span>
-                        {updateResults[c.id]?.updateAvailable === true && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-300 font-medium shrink-0">
-                            Update available
-                          </span>
-                        )}
-                        {updateResults[c.id]?.updateAvailable === false && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/40 text-green-400 font-medium shrink-0">
-                            Up to date
-                          </span>
-                        )}
-                        {updateResults[c.id]?.updateAvailable === null && (
-                          <span
-                            className="text-[10px] text-gray-600 truncate"
-                            title={updateResults[c.id]?.reason}
-                          >
-                            {updateResults[c.id]?.reason}
-                          </span>
-                        )}
-                        {restartError?.id === c.id && (
-                          <span className="text-xs text-red-400 truncate" title={restartError.message}>
-                            Restart failed: {restartError.message}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        {c.ports.length > 0 && (
-                          <span className="text-xs text-gray-600 font-mono hidden md:block">
-                            :{c.ports.join(' :')}
-                          </span>
-                        )}
-                        <span className={`text-xs tabular-nums ${
-                          c.state === 'running' ? 'text-gray-500' : 'text-red-400'
-                        }`}>
-                          {isRestarting ? 'Restarting…' : c.status}
-                        </span>
-                        <button
-                          onClick={() => checkUpdate.mutate(c.id)}
-                          disabled={checkUpdate.isPending && checkUpdate.variables === c.id}
-                          title="Check for a newer image on the registry"
-                          className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
-                        >
-                          {checkUpdate.isPending && checkUpdate.variables === c.id ? '…' : 'Check update'}
-                        </button>
-                        <button
-                          onClick={() => setLogsTarget({ id: c.id, name: c.name })}
-                          title="View recent logs"
-                          className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          Logs
-                        </button>
-                        {confirmTarget === c.id ? (
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => restartContainer.mutate(c.id)}
-                              className="text-xs px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white transition-colors"
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              onClick={() => setConfirmTarget(null)}
-                              className="text-xs px-1.5 py-1 rounded bg-gray-700 text-gray-400 hover:text-white transition-colors"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setConfirmTarget(c.id)}
-                            disabled={isRestarting}
-                            title="Restart container"
-                            className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-blue-900/60 text-gray-500 hover:text-blue-300 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
-                          >
-                            Restart
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
+            <ContainerSection
+              title={data.remoteContainers?.length ? 'Docker Containers — MediaOps host' : 'Docker Containers'}
+              containers={data.containers}
+            />
           )}
+          {data.remoteContainers?.map((r) => (
+            <ContainerSection
+              key={r.serverId}
+              title={`Docker Containers — ${r.name}`}
+              server={r.serverId}
+              containers={r.containers}
+              error={r.error}
+            />
+          ))}
         </>
       )}
 
-      {logsTarget && (
-        <LogsModal id={logsTarget.id} name={logsTarget.name} onClose={() => setLogsTarget(null)} />
-      )}
     </div>
   )
 }
