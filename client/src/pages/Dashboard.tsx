@@ -569,9 +569,9 @@ function MusicRequestsSection({ data }: { data: MusicRequests | { error: string 
     ['Downloading', stages.downloading + stages.importing, 'text-green-400'],
     ['Stuck', stages.stuck, 'text-yellow-400'],
     ['Failed', counts.failed, 'text-red-400'],
-    ['Awaiting approval', counts.pending, 'text-blue-400'],
+    ['Pending', counts.pending, 'text-blue-400'],
     ['Done today', completed.day],
-    ['Done this week', completed.week],
+    ['Done 7 days', completed.week],
     ['Available', counts.available],
   ]
   const shown = showAll ? data.attention : data.attention.slice(0, 6)
@@ -581,11 +581,11 @@ function MusicRequestsSection({ data }: { data: MusicRequests | { error: string 
         <h2 className="section-label">Music Requests</h2>
         <span className="text-xs text-gray-600">{data.total.toLocaleString()} total</span>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-3">
+      <div className="grid grid-cols-4 lg:grid-cols-8 gap-2 mb-3">
         {tiles.map(([label, n, color]) => (
-          <div key={label} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
-            <p className={`text-xl font-bold tabular-nums ${n && color ? color : 'text-white'}`}>{n.toLocaleString()}</p>
-            <p className="text-[11px] text-gray-500">{label}</p>
+          <div key={label} className="bg-gray-900 border border-gray-800 rounded-lg px-2 sm:px-3 py-2 min-w-0">
+            <p className={`text-lg sm:text-xl font-bold tabular-nums ${n && color ? color : 'text-white'}`}>{n.toLocaleString()}</p>
+            <p className="text-[10px] sm:text-[11px] text-gray-500 truncate">{label}</p>
           </div>
         ))}
       </div>
