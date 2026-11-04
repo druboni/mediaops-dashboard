@@ -38,7 +38,9 @@ interface MemInfo {
 interface GpuInfo {
   name: string
   gpu_util: number
-  mem_util: number
+  enc_util?: number | null  // NVENC/NVDEC — what Plex transcodes on; GPU sidecar only
+  dec_util?: number | null
+  mem_util: number          // memory bandwidth, not VRAM used
   mem_used: number
   mem_total: number
   temp: number
@@ -122,6 +124,12 @@ function GaugeBar({ percent, color = 'blue' }: { percent: number; color?: string
   )
 }
 
+// Transcodes run on the video engines, which barely touch the 3D load, so the
+// headline figure is whichever engine is busiest.
+function gpuLoad(gpu: GpuInfo) {
+  return Math.max(gpu.gpu_util, gpu.enc_util ?? 0, gpu.dec_util ?? 0)
+}
+
 function GpuProcessBadge({ name }: { name: string }) {
   const lower = name.toLowerCase()
   if (lower.includes('plex transcode') || lower.includes('plex media')) {
@@ -190,16 +198,26 @@ function ServerCard({ server }: { server: ServerStats }) {
             <div>
               <div className="flex justify-between text-xs text-gray-500 mb-0.5">
                 <span>GPU Load</span>
-                <span className="text-white">{server.gpu.gpu_util.toFixed(0)}%</span>
+                <span className="text-white">{gpuLoad(server.gpu).toFixed(0)}%</span>
               </div>
-              <GaugeBar percent={server.gpu.gpu_util} color="purple" />
+              <GaugeBar percent={gpuLoad(server.gpu)} color="purple" />
+              {(server.gpu.enc_util != null || server.gpu.dec_util != null) && (
+                <div className="flex gap-3 text-[11px] text-gray-600 mt-1">
+                  <span>3D {server.gpu.gpu_util.toFixed(0)}%</span>
+                  {server.gpu.enc_util != null && <span>Encode {server.gpu.enc_util.toFixed(0)}%</span>}
+                  {server.gpu.dec_util != null && <span>Decode {server.gpu.dec_util.toFixed(0)}%</span>}
+                </div>
+              )}
             </div>
             <div>
               <div className="flex justify-between text-xs text-gray-500 mb-0.5">
                 <span>VRAM</span>
                 <span className="text-white">{server.gpu.mem_used.toFixed(0)} / {server.gpu.mem_total.toFixed(0)} MB</span>
               </div>
-              <GaugeBar percent={server.gpu.mem_util} color="purple" />
+              <GaugeBar
+                percent={server.gpu.mem_total > 0 ? (server.gpu.mem_used / server.gpu.mem_total) * 100 : server.gpu.mem_util}
+                color="purple"
+              />
             </div>
             <div className="flex gap-4 text-xs text-gray-600 mt-1">
               <span>🌡 {server.gpu.temp.toFixed(0)}°C</span>
