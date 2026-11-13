@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
+import WrongLanguage from '../components/WrongLanguage'
 
 interface WantedMovie {
   id: number
@@ -80,7 +81,7 @@ function epCode(s: number, e: number) {
 export default function Wanted() {
   const { enabledServices } = useConfig()
   const queryClient = useQueryClient()
-  const [mode, setMode] = useState<'missing' | 'upgrades'>('missing')
+  const [mode, setMode] = useState<'missing' | 'upgrades' | 'language'>('missing')
   const [tab, setTab] = useState<'movies' | 'episodes'>('movies')
   const [searching, setSearching] = useState<Set<string>>(new Set())
   const [searched, setSearched] = useState<Set<string>>(new Set())
@@ -156,7 +157,11 @@ export default function Wanted() {
         <div>
           <h1 className="text-2xl font-bold text-white">Wanted / Missing</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {mode === 'missing' ? 'Monitored items not yet downloaded' : 'Items below quality cutoff, eligible for a better version'}
+            {mode === 'missing'
+              ? 'Monitored items not yet downloaded'
+              : mode === 'upgrades'
+              ? 'Items below quality cutoff, eligible for a better version'
+              : 'Files with no audio in the original language (e.g. a German-only dub)'}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -173,7 +178,7 @@ export default function Wanted() {
             </div>
           )}
           <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs shrink-0">
-            {(['missing', 'upgrades'] as const).map((m) => (
+            {(['missing', 'upgrades', 'language'] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
@@ -181,13 +186,14 @@ export default function Wanted() {
                   mode === m ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
                 }`}
               >
-                {m === 'missing' ? 'Missing' : 'Upgrades'}
+                {m === 'missing' ? 'Missing' : m === 'upgrades' ? 'Upgrades' : 'Wrong Language'}
               </button>
             ))}
           </div>
         </div>
       </div>
 
+      {mode === 'language' ? <WrongLanguage /> : <>
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-5 border-b border-gray-800">
         {([
@@ -446,6 +452,7 @@ export default function Wanted() {
           </div>
         )
       )}
+      </>}
     </div>
   )
 }

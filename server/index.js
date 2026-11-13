@@ -17,6 +17,7 @@ import healthRoutes from './routes/health.js'
 import systemRoutes from './routes/system.js'
 import searchRoutes from './routes/search.js'
 import wantedRoutes from './routes/wanted.js'
+import languageRoutes from './routes/language.js'
 import historyRoutes from './routes/history.js'
 import statsRoutes from './routes/stats.js'
 import plexRoutes from './routes/plex.js'
@@ -55,6 +56,7 @@ await fastify.register(healthRoutes, { prefix: '/api/health' })
 await fastify.register(systemRoutes, { prefix: '/api/system' })
 await fastify.register(searchRoutes, { prefix: '/api/search' })
 await fastify.register(wantedRoutes,  { prefix: '/api/wanted' })
+await fastify.register(languageRoutes, { prefix: '/api/language' })
 await fastify.register(historyRoutes, { prefix: '/api/history' })
 await fastify.register(statsRoutes,   { prefix: '/api/stats' })
 await fastify.register(plexRoutes,    { prefix: '/api/plex' })
