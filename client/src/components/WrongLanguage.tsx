@@ -112,8 +112,8 @@ export default function WrongLanguage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <p className="text-xs text-gray-500">
           {items.length
-            ? <>{files} file{files === 1 ? '' : 's'} in {items.length} season{items.length === 1 ? '' : 's'}/movie{items.length === 1 ? '' : 's'} with no audio in the original language.</>
-            : 'Every file has an audio track in its original language.'}
+            ? <>{files} file{files === 1 ? '' : 's'} in {items.length} season{items.length === 1 ? '' : 's'}/movie{items.length === 1 ? '' : 's'} with no audio in English or the original language.</>
+            : 'Every file has an audio track in English or its original language.'}
           {data?.scannedAt && <span className="text-gray-600"> Scanned {new Date(data.scannedAt).toLocaleTimeString()}.</span>}
         </p>
         <div className="flex items-center gap-2 shrink-0">

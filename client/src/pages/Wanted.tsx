@@ -161,7 +161,7 @@ export default function Wanted() {
               ? 'Monitored items not yet downloaded'
               : mode === 'upgrades'
               ? 'Items below quality cutoff, eligible for a better version'
-              : 'Files with no audio in the original language (e.g. a German-only dub)'}
+              : 'Files with no audio in English or the original language (e.g. a German-only dub)'}
           </p>
         </div>
         <div className="flex items-center gap-4">

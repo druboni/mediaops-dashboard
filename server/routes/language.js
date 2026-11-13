@@ -6,13 +6,14 @@ import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
 
 // Wrong-language files: episodes and movies whose audio has no track in the
-// title's original language (a German-only Stargate Universe, a Hebrew dub of
-// a Disney show). Sonarr and Radarr already read every file's audio tracks
-// (mediaInfo.audioLanguages), so the scan is API-only, no ffprobe.
+// title's original language or in English (a German-only Stargate Universe, a
+// Hebrew dub of a Disney show; an English dub of an anime is fine). Sonarr and
+// Radarr already read every file's audio tracks (mediaInfo.audioLanguages), so
+// the scan is API-only, no ffprobe.
 //
 // A file is listed only when every track has a real language tag and none is
-// the original language. Untagged or "und" tracks may well be the original, so
-// they never count against a file.
+// the original language or English. Untagged or "und" tracks may well be the
+// original, so they never count against a file.
 //
 // Replacing first asks the *arr for releases (the same list as an interactive
 // search) and only deletes the file when one exists that the profile would take
@@ -46,9 +47,10 @@ const CODES = {
 }
 const UNTAGGED = new Set(['', 'und', 'mul', 'zxx', 'qaa', 'unknown'])
 
-/** Original-language name, or null when the file has a track in it / we can't tell. */
+/** Original-language name, or null when the file has a track in it or in English / we can't tell. */
 function wrongLanguage(audioLanguages, original) {
-  const wanted = CODES[original]
+  // English is always fine too: English dubs of anime are wanted, German dubs of English shows aren't.
+  const wanted = CODES[original] && [...CODES[original], ...CODES.English]
   if (!wanted) return null
   const tracks = String(audioLanguages ?? '').toLowerCase().split('/').map((t) => t.trim())
   if (!tracks.length || tracks.some((t) => UNTAGGED.has(t))) return null
