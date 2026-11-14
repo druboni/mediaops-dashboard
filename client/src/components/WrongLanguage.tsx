@@ -115,6 +115,7 @@ export default function WrongLanguage() {
             ? <>{files} file{files === 1 ? '' : 's'} in {items.length} season{items.length === 1 ? '' : 's'}/movie{items.length === 1 ? '' : 's'} with no audio in English or the original language.</>
             : 'Every file has an audio track in English or its original language.'}
           {data?.scannedAt && <span className="text-gray-600"> Scanned {new Date(data.scannedAt).toLocaleTimeString()}.</span>}
+          <span className="block text-gray-600 mt-0.5">Replacements are dated back to their air date in Plex, so they don't show up in Recently Added.</span>
         </p>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={rescan} disabled={isFetching || !!bulk} className="text-xs px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-50">

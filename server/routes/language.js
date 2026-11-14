@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
+import { trackReplacement } from '../plexAddedAt.js'
 
 // Wrong-language files: episodes and movies whose audio has no track in the
 // title's original language or in English (a German-only Stargate Universe, a
@@ -200,6 +201,10 @@ async function replace(item) {
     await call('/command', { method: 'POST', body: { name: 'MoviesSearch', movieIds: [item.movieId] } })
   }
   record({ app: item.app, title: label, files: item.fileCount, audio: item.audio, removed: item.sample, options: options.length, example: options[0].title })
+  // The re-downloads are old episodes; keep them off Plex's Recently Added (server/plexAddedAt.js).
+  trackReplacement(item.app === 'sonarr'
+    ? { app: 'sonarr', seriesId: item.seriesId, seasonNumber: item.seasonNumber, title: label }
+    : { app: 'radarr', movieId: item.movieId, title: label })
   addLog('info', `[language] ${label}: deleted ${item.fileCount} file(s) with ${item.audio.join(', ')} audio and searched (${options.length} ${item.originalLanguage} releases available)`, { service: item.app })
   cache.items = cache.items.filter((i) => i.key !== item.key)
   return { replaced: true, message: `Replacing ${item.fileCount} file${item.fileCount === 1 ? '' : 's'}, e.g. ${options[0].title}` }

@@ -27,6 +27,7 @@ import webhookRoutes from './routes/webhooks.js'
 import { startAutoBackup } from './autoBackup.js'
 import { startDeadTorrentSweep } from './deadTorrents.js'
 import { startBadFileSweep } from './badFiles.js'
+import { startPlexAddedAtSweep } from './plexAddedAt.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -92,3 +93,4 @@ console.log(`MediaOps server running on http://${HOST}:${PORT}`)
 startAutoBackup()
 startDeadTorrentSweep()
 startBadFileSweep()
+startPlexAddedAtSweep()

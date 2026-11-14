@@ -93,7 +93,7 @@ Joins Radarr/Sonarr file sizes against Tautulli play history, then groups everyt
 - Missing movies from Radarr and missing episodes from Sonarr in one place
 - Episodes grouped by series
 - Trigger an individual search, a full series search, or a movie search with one click
-- **Wrong Language** — seasons and movies whose files have no audio track in English or the title's original language (a German-only dub of an English show; an English dub of an anime is fine), from the audio tracks Sonarr/Radarr already read. Replace deletes them and searches again, but only after checking that a release the profile accepts exists; Ignore hides a show or movie for good. Replacements are logged to `config/language-replaced.jsonl`
+- **Wrong Language** — seasons and movies whose files have no audio track in English or the title's original language (a German-only dub of an English show; an English dub of an anime is fine), from the audio tracks Sonarr/Radarr already read. Replace deletes them and searches again, but only after checking that a release the profile accepts exists; Ignore hides a show or movie for good. Replacements are logged to `config/language-replaced.jsonl`, and once the new files reach Plex their "date added" is set back to the air/release date so they don't flood Recently Added (`server/plexAddedAt.js`)
 
 ### History
 - Unified activity feed from Radarr, Sonarr, and Lidarr
