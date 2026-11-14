@@ -1,0 +1,30 @@
+# systemd unit for scripts/encode-sidecar.py on the GPU box (plexgpu, .21).
+#
+#   sudo mkdir -p /opt/encode-sidecar
+#   sudo cp encode-sidecar.py /opt/encode-sidecar/server.py
+#   echo "ENCODE_SIDECAR_TOKEN=$(openssl rand -hex 32)" | sudo tee /opt/encode-sidecar/.env
+#   sudo chown -R brian:brian /opt/encode-sidecar && sudo chmod 600 /opt/encode-sidecar/.env
+#   sudo cp encode-sidecar.service /etc/systemd/system/ && sudo systemctl enable --now encode-sidecar
+#
+# Runs as the user that owns the library so it can replace files. The work dir
+# must be on the fast local disk (the NVMe root here), not the mergerfs pool.
+[Unit]
+Description=MediaOps encode sidecar (GPU re-encode)
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+User=brian
+Group=brian
+EnvironmentFile=/opt/encode-sidecar/.env
+Environment=ENCODE_ROOTS=/mnt/plex
+Environment=ENCODE_WORK_DIR=/home/brian/mediaops-encode
+ExecStart=/usr/bin/python3 /opt/encode-sidecar/server.py 8768
+Restart=on-failure
+RestartSec=10
+# A stop mid-job kills ffmpeg; the original is untouched and the job is marked failed.
+KillMode=control-group
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

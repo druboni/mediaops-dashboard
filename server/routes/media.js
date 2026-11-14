@@ -564,7 +564,10 @@ function lookupWatch({ guidIndex, tautulli }, kind, item) {
 // Every configured Radarr/Sonarr, primary and secondary, as a uniform list. The
 // proxyBase is what the browser will call to act on the item, so it has to match
 // the two shapes proxy.js serves.
-function reclaimTargets(config) {
+// Movies smaller than this aren't worth a re-encode pass.
+const REENCODE_MIN_BYTES = 4 * 1_073_741_824
+
+export function reclaimTargets(config) {
   const targets = []
   const { radarr, sonarr } = config.services
   const extra = config.additionalInstances ?? {}
@@ -680,6 +683,8 @@ export default async function mediaRoutes(fastify) {
           addedMs: added,
           monitored: !!raw.monitored,
           quality: isMovie ? raw.movieFile?.quality?.quality?.name ?? null : null,
+          videoCodec: isMovie ? raw.movieFile?.mediaInfo?.videoCodec ?? null : null,
+          resolution: isMovie ? raw.movieFile?.mediaInfo?.resolution ?? null : null,
           ended: isMovie ? null : !!raw.ended,
           episodeFileCount: isMovie ? null : raw.statistics?.episodeFileCount ?? null,
           playCount: watch?.inPlex ? Math.max(watch.playCount ?? 0, hist?.plays ?? 0) : null,
@@ -768,6 +773,19 @@ export default async function mediaRoutes(fastify) {
       if (d) { item.downgrade = d; item.lenses.push('downgrade') }
     }
 
+    // Re-encode: big non-HEVC 1080p-and-below movies, which a GPU HEVC pass
+    // shrinks in place. Savings estimates come from the library's own batches:
+    // Blu-ray/remux sources lost 50-60%, already-efficient WEB-DLs 15-25%.
+    for (const item of items) {
+      if (item.unit !== 'movie' || item.size < REENCODE_MIN_BYTES || !item.videoCodec) continue
+      if (/^(x265|h\.?265|hevc|av1)$/i.test(item.videoCodec)) continue
+      const height = Number(String(item.resolution || '').split('x')[1]) || 0
+      if (height > 1600 || /2160/.test(item.quality || '')) continue
+      const ratio = /remux|bluray|blu-ray/i.test(item.quality || '') ? 0.55 : /web/i.test(item.quality || '') ? 0.2 : 0.4
+      item.reencode = { saving: Math.round(item.size * ratio) }
+      item.lenses.push('reencode')
+    }
+
     // Recommended: everything that's a sensible delete, ranked by space freed
     // weighted against how much it would be missed.
     for (const item of items) {
@@ -789,10 +807,11 @@ export default async function mediaRoutes(fastify) {
     // silently drops the tail of a small lens — a 6-item orphan list showing 5
     // rows while its tab still said 6 — because large items from other lenses
     // fill the budget first.
-    const LENSES = ['recommended', 'seasons', 'never-played', 'stale', 'downgrade', 'largest', 'duplicates', 'orphans']
+    const LENSES = ['recommended', 'seasons', 'never-played', 'stale', 'downgrade', 'reencode', 'largest', 'duplicates', 'orphans']
     const rank = {
       recommended: (a, b) => b.score - a.score,
       downgrade: (a, b) => b.downgrade.saving - a.downgrade.saving,
+      reencode: (a, b) => b.reencode.saving - a.reencode.saving,
     }
     const selected = new Map()
     for (const lens of LENSES) {
@@ -811,7 +830,7 @@ export default async function mediaRoutes(fastify) {
       const matching = items.filter((i) => i.lenses.includes(lens))
       lensTotals[lens] = {
         count: matching.length,
-        bytes: matching.reduce((sum, i) => sum + (lens === 'downgrade' ? i.downgrade.saving : i.size), 0),
+        bytes: matching.reduce((sum, i) => sum + (lens === 'downgrade' ? i.downgrade.saving : lens === 'reencode' ? i.reencode.saving : i.size), 0),
         // Lets the UI say "showing the largest 400 of 900" rather than quietly
         // disagreeing with its own tab count.
         shown: candidates.filter((i) => i.lenses.includes(lens)).length,

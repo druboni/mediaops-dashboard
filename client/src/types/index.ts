@@ -69,6 +69,12 @@ export interface MonitoredServer {
   speedtestPort?: number
   dockerPort?: number
   dockerToken?: string
+  // scripts/encode-sidecar.py: GPU re-encode from Reclaim. The path mapping turns
+  // a Radarr/Sonarr path (/data/media/...) into the encode server's (/mnt/plex/...).
+  encodePort?: number
+  encodeToken?: string
+  encodePathFrom?: string
+  encodePathTo?: string
 }
 
 export interface SpeedtestResult {

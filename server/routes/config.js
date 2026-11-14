@@ -132,6 +132,7 @@ export async function getConfig() {
   }
   for (const server of merged.monitoredServers ?? []) {
     if (server.dockerToken) server.dockerToken = decryptValue(server.dockerToken)
+    if (server.encodeToken) server.encodeToken = decryptValue(server.encodeToken)
   }
 
   return merged
@@ -164,6 +165,7 @@ export async function saveConfig(config) {
   }
   for (const server of toWrite.monitoredServers ?? []) {
     if (server.dockerToken) server.dockerToken = encryptValue(decryptValue(server.dockerToken))
+    if (server.encodeToken) server.encodeToken = encryptValue(decryptValue(server.encodeToken))
   }
   await mkdir(dirname(CONFIG_PATH), { recursive: true })
   await writeFile(CONFIG_PATH, JSON.stringify(toWrite, null, 2))

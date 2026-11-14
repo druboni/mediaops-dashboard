@@ -1228,6 +1228,7 @@ function MonitoredServersBlock({
   })
 
   const [dockerEdit, setDockerEdit] = useState<{ id: string; port: string; token: string } | null>(null)
+  const [encodeEdit, setEncodeEdit] = useState<{ id: string; port: string; token: string; from: string; to: string } | null>(null)
 
   const add = () => {
     if (!draft.name.trim() || !draft.host.trim()) return
@@ -1252,6 +1253,7 @@ function MonitoredServersBlock({
             <span className="text-xs text-gray-600 truncate flex-1 font-mono">
               {s.host}:{s.glancesPort ?? 61208}{s.gpuPort ? ` · GPU :${s.gpuPort}` : ''}{s.speedtestPort ? ` · Speedtest :${s.speedtestPort}` : ''}
               {s.dockerPort && s.dockerToken ? ` · Docker :${s.dockerPort}` : ''}
+              {s.encodePort && s.encodeToken ? ` · Encode :${s.encodePort}` : ''}
             </span>
             <button
               onClick={() => setDockerEdit(dockerEdit?.id === s.id ? null : { id: s.id, port: s.dockerPort ? String(s.dockerPort) : '8767', token: s.dockerToken ?? '' })}
@@ -1259,6 +1261,19 @@ function MonitoredServersBlock({
               title="Docker sidecar for this server's containers"
             >
               Docker
+            </button>
+            <button
+              onClick={() => setEncodeEdit(encodeEdit?.id === s.id ? null : {
+                id: s.id,
+                port: s.encodePort ? String(s.encodePort) : '8768',
+                token: s.encodeToken ?? '',
+                from: s.encodePathFrom ?? '/data/media',
+                to: s.encodePathTo ?? '/mnt/plex',
+              })}
+              className="text-xs text-gray-500 hover:text-white transition-colors shrink-0"
+              title="GPU re-encode sidecar (Reclaim → Re-encode)"
+            >
+              Encode
             </button>
             <button
               onClick={() => onChange(servers.filter((x) => x.id !== s.id))}
@@ -1302,6 +1317,66 @@ function MonitoredServersBlock({
               Set
             </button>
             <span className="text-[11px] text-gray-600 basis-full">Clear the token to stop showing this server's containers. Save settings afterwards.</span>
+          </div>
+        )}
+        {encodeEdit && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 flex gap-2 items-center flex-wrap">
+            <span className="text-xs text-gray-500 shrink-0">
+              Encode sidecar on {servers.find((x) => x.id === encodeEdit.id)?.name}
+            </span>
+            <input
+              type="number"
+              placeholder="Port (8768)"
+              value={encodeEdit.port}
+              onChange={(e) => setEncodeEdit({ ...encodeEdit, port: e.target.value })}
+              className="input w-28"
+            />
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder="Token (ENCODE_SIDECAR_TOKEN)"
+              value={encodeEdit.token}
+              onChange={(e) => setEncodeEdit({ ...encodeEdit, token: e.target.value })}
+              className="input flex-1 min-w-[12rem]"
+            />
+            <span className="text-[11px] text-gray-500 basis-full">
+              Path mapping: Radarr/Sonarr path prefix → the same folder on this server
+            </span>
+            <input
+              type="text"
+              placeholder="/data/media"
+              value={encodeEdit.from}
+              onChange={(e) => setEncodeEdit({ ...encodeEdit, from: e.target.value })}
+              className="input w-40 font-mono text-xs"
+            />
+            <span className="text-gray-600 text-xs">→</span>
+            <input
+              type="text"
+              placeholder="/mnt/plex"
+              value={encodeEdit.to}
+              onChange={(e) => setEncodeEdit({ ...encodeEdit, to: e.target.value })}
+              className="input w-40 font-mono text-xs"
+            />
+            <button
+              onClick={() => {
+                const port = encodeEdit.port ? Number(encodeEdit.port) : undefined
+                const token = encodeEdit.token.trim() || undefined
+                onChange(servers.map((x) => x.id === encodeEdit.id
+                  ? {
+                      ...x,
+                      encodePort: token ? port : undefined,
+                      encodeToken: token,
+                      encodePathFrom: token ? encodeEdit.from.trim() || undefined : undefined,
+                      encodePathTo: token ? encodeEdit.to.trim() || undefined : undefined,
+                    }
+                  : x))
+                setEncodeEdit(null)
+              }}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              Set
+            </button>
+            <span className="text-[11px] text-gray-600 basis-full">Clear the token to turn re-encoding off. Save settings afterwards.</span>
           </div>
         )}
         {servers.length === 0 && (

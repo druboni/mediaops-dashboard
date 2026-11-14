@@ -24,10 +24,12 @@ import plexRoutes from './routes/plex.js'
 import mediaRoutes from './routes/media.js'
 import publicCalendarRoutes from './routes/publicCalendar.js'
 import webhookRoutes from './routes/webhooks.js'
+import encodeRoutes from './routes/encode.js'
 import { startAutoBackup } from './autoBackup.js'
 import { startDeadTorrentSweep } from './deadTorrents.js'
 import { startBadFileSweep } from './badFiles.js'
 import { startPlexAddedAtSweep } from './plexAddedAt.js'
+import { startEncodeSweep } from './encode.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -62,6 +64,7 @@ await fastify.register(historyRoutes, { prefix: '/api/history' })
 await fastify.register(statsRoutes,   { prefix: '/api/stats' })
 await fastify.register(plexRoutes,    { prefix: '/api/plex' })
 await fastify.register(mediaRoutes,   { prefix: '/api/media' })
+await fastify.register(encodeRoutes,  { prefix: '/api/encode' })
 // Unauthenticated by design (secret-gated, read-only) — see the route file.
 await fastify.register(publicCalendarRoutes, { prefix: '/api/public/calendar' })
 await fastify.register(webhookRoutes, { prefix: '/api/webhooks' })
@@ -94,3 +97,4 @@ startAutoBackup()
 startDeadTorrentSweep()
 startBadFileSweep()
 startPlexAddedAtSweep()
+startEncodeSweep()

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
 import MediaDetail from '../components/MediaDetail'
+import { ReencodeDialog, EncodeJobs, useEncodeStatus } from '../components/Reencode'
 
 // Disk reclaim — "what can I safely delete?"
 //
@@ -18,7 +19,7 @@ import MediaDetail from '../components/MediaDetail'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Lens = 'recommended' | 'seasons' | 'never-played' | 'stale' | 'downgrade' | 'largest' | 'duplicates' | 'orphans'
+type Lens = 'recommended' | 'seasons' | 'never-played' | 'stale' | 'downgrade' | 'reencode' | 'largest' | 'duplicates' | 'orphans'
 
 interface Candidate {
   key: string
@@ -33,6 +34,8 @@ interface Candidate {
   score?: number
   regret?: number
   downgrade?: { saving: number; estimate: number; movieFileId: number | null }
+  reencode?: { saving: number }
+  videoCodec?: string | null
   kind: 'movie' | 'series'
   arrId: number
   proxyBase: string
@@ -116,6 +119,12 @@ const LENS_META: Record<Lens, { label: string; blurb: string; needs: LensNeed }>
       'Big 4K / remux movies that are rarely watched. Keep them at 1080p instead: switch the profile, delete the big file, and search. The size shown is the estimated saving.',
     needs: 'watch',
   },
+  reencode: {
+    label: 'Re-encode',
+    blurb:
+      "Big movies that aren't HEVC yet. Re-encoding with the GPU keeps them in place at the same resolution, just smaller. The size shown is an estimated saving (Blu-ray/remux ≈55%, WEB ≈20%). Select anything (shows and seasons too) and press Re-encode.",
+    needs: 'none',
+  },
   'never-played': {
     label: 'Never Played',
     blurb: 'Has files, zero plays in Tautulli, and old enough to have had a fair chance.',
@@ -153,7 +162,7 @@ const lensBlocked = (lens: Lens, sources?: ReclaimResponse['sources']) => {
   return false
 }
 
-const LENS_ORDER: Lens[] = ['recommended', 'seasons', 'never-played', 'stale', 'downgrade', 'largest', 'duplicates', 'orphans']
+const LENS_ORDER: Lens[] = ['recommended', 'seasons', 'never-played', 'stale', 'downgrade', 'reencode', 'largest', 'duplicates', 'orphans']
 
 // ── Confirm modal ──────────────────────────────────────────────────────────
 
@@ -250,8 +259,9 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   score: 'desc',
 }
 
-// What acting on a row actually frees: a downgrade keeps most of the title.
-const freed = (c: Candidate, lens: Lens) => (lens === 'downgrade' && c.downgrade ? c.downgrade.saving : c.size)
+// What acting on a row actually frees: a downgrade or re-encode keeps the title.
+const freed = (c: Candidate, lens: Lens) =>
+  lens === 'downgrade' && c.downgrade ? c.downgrade.saving : lens === 'reencode' && c.reencode ? c.reencode.saving : c.size
 
 // Each lens opens in the order that makes sense for it.
 const lensSort = (l: Lens): SortKey => (l === 'recommended' ? 'score' : 'size')
@@ -316,6 +326,7 @@ export default function Reclaim() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
   const [detail, setDetail] = useState<{ kind: 'movie' | 'series'; id: number } | null>(null)
   const [confirming, setConfirming] = useState<'delete' | 'downgrade' | null>(null)
+  const [reencoding, setReencoding] = useState(false)
   const [goalTb, setGoalTb] = useState('1')
   const [profileId, setProfileId] = useState<number | null>(null)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
@@ -326,6 +337,7 @@ export default function Reclaim() {
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const enabled = enabledServices.includes('radarr') || enabledServices.includes('sonarr')
+  const { data: encodeStatus } = useEncodeStatus()
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<ReclaimResponse>({
     queryKey: ['reclaim', neverPlayedDays, staleMonths],
@@ -616,6 +628,8 @@ export default function Reclaim() {
         </div>
       )}
 
+      {encodeStatus?.configured && <EncodeJobs status={encodeStatus} />}
+
       {/* Result / progress banner */}
       {busy && (
         <div className="mb-4 bg-blue-900/20 border border-blue-900/60 rounded-lg px-4 py-2.5">
@@ -685,7 +699,17 @@ export default function Reclaim() {
                 </button>
               </>
             )}
-            {lens !== 'downgrade' && (
+            {encodeStatus?.configured && (
+              <button
+                onClick={() => setReencoding(true)}
+                disabled={!!busy || encodeStatus.reachable === false}
+                title="Shrink in place with the GPU: copy to the encode server, re-encode to HEVC, copy back"
+                className="text-xs px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white transition-colors disabled:opacity-60"
+              >
+                Re-encode
+              </button>
+            )}
+            {lens !== 'downgrade' && lens !== 'reencode' && (
               <button
                 onClick={() => setConfirming('delete')}
                 disabled={!!busy}
@@ -800,6 +824,11 @@ export default function Reclaim() {
                           <span className="text-green-400">−{formatBytes(c.downgrade.saving)}</span>
                           <span className="block text-gray-600">of {formatBytes(c.size)}</span>
                         </>
+                      ) : lens === 'reencode' && c.reencode ? (
+                        <>
+                          <span className="text-green-400">≈ −{formatBytes(c.reencode.saving)}</span>
+                          <span className="block text-gray-600">of {formatBytes(c.size)}{c.videoCodec ? ` · ${c.videoCodec}` : ''}</span>
+                        </>
                       ) : (
                         formatBytes(c.size)
                       )}
@@ -823,6 +852,15 @@ export default function Reclaim() {
             onChanged={() => refetch()}
           />
         </>
+      )}
+
+      {reencoding && encodeStatus?.configured && (
+        <ReencodeDialog
+          items={selected.map((c) => ({ proxyBase: c.proxyBase, arrId: c.arrId, unit: c.unit, seasonNumber: c.seasonNumber }))}
+          presets={encodeStatus.presets}
+          onCancel={() => setReencoding(false)}
+          onQueued={(msg) => { setReencoding(false); setSelectedKeys(new Set()); setResult(msg) }}
+        />
       )}
 
       {confirming && (
