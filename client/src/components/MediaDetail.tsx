@@ -294,6 +294,19 @@ export default function MediaDetail({
     },
   })
 
+  // Upgrade to 4K: moves the title onto the "4K Upgrade" profile and searches;
+  // the *arr replaces the current file once a 4K one imports (server/routes/upgrade.js).
+  const [confirmUpgrade, setConfirmUpgrade] = useState(false)
+  const [upgradeError, setUpgradeError] = useState<string | null>(null)
+  const upgrade = useMutation({
+    mutationFn: (cancel: boolean) =>
+      cancel ? api.delete(`/upgrade/${kind}/${id}`) : api.post(`/upgrade/${kind}/${id}`),
+    onMutate: () => { setConfirmUpgrade(false); setUpgradeError(null) },
+    onSuccess: refresh,
+    onError: (err: unknown) =>
+      setUpgradeError((err as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Failed'),
+  })
+
   const remove = useMutation({
     mutationFn: (deleteFiles: boolean) =>
       api.delete(`/proxy/${arrApp}/api/v3/${arrPath}/${id}`, {
@@ -629,6 +642,57 @@ export default function MediaDetail({
 
       {/* Actions */}
       <div className="px-5 py-4 border-t border-gray-800 shrink-0">
+        {(() => {
+          const onUpgradeProfile = data.qualityProfileName === '4K Upgrade'
+          const has4kFile = kind === 'movie' && /2160p/i.test(`${data.file?.quality ?? ''} ${data.file?.resolution ?? ''}`)
+          const fileWord = kind === 'movie' ? 'file' : 'episodes'
+          if (onUpgradeProfile) {
+            return (
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-xs text-purple-300">
+                  {has4kFile ? 'Upgraded to 4K' : `4K upgrade pending: the current ${fileWord} stay until a 4K release imports`}
+                </p>
+                {!has4kFile && (
+                  <button
+                    onClick={() => upgrade.mutate(true)}
+                    disabled={upgrade.isPending}
+                    className="text-xs text-gray-500 hover:text-white shrink-0 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )
+          }
+          if (data.qualityProfileName === 'Ultra-HD' || has4kFile) return null
+          return (
+            <div className="mb-3">
+              {confirmUpgrade ? (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => upgrade.mutate(false)}
+                    className="flex-1 text-xs py-1.5 rounded bg-purple-700 hover:bg-purple-600 text-white"
+                  >
+                    Find 4K and replace
+                  </button>
+                  <button onClick={() => setConfirmUpgrade(false)} className="text-xs px-3 py-1.5 rounded bg-gray-800 text-gray-400 hover:text-white">
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmUpgrade(true)}
+                  disabled={upgrade.isPending}
+                  title={`Search for a 2160p release; ${kind === 'movie' ? 'Radarr' : 'Sonarr'} replaces the current ${fileWord} when it imports`}
+                  className="w-full text-xs py-1.5 rounded border border-purple-800 bg-purple-900/30 text-purple-200 hover:bg-purple-900/60 disabled:opacity-50"
+                >
+                  {upgrade.isPending ? 'Starting…' : 'Upgrade to 4K'}
+                </button>
+              )}
+              {upgradeError && <p className="text-xs text-red-400 mt-1">{upgradeError}</p>}
+            </div>
+          )
+        })()}
         {showDeleteConfirm ? (
           <div className="space-y-2">
             <p className="text-xs text-gray-400">
