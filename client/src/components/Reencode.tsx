@@ -30,6 +30,23 @@ interface EncodeJob {
   newSize: number | null
 }
 
+// One press of Queue, tallied server-side as its jobs finish (server/encode.js).
+interface EncodeBatch {
+  id: string
+  label: string
+  queuedAt: number
+  total: number
+  remaining: number
+  done: number
+  skipped: number
+  failed: number
+  cancelled: number
+  savedBytes: number
+  originalBytes: number
+  finishedAt: number | null
+  dismissed: boolean
+}
+
 export interface EncodeStatus {
   configured: boolean
   reachable?: boolean
@@ -38,6 +55,7 @@ export interface EncodeStatus {
   presets: { movie: number; tv: number }
   jobs?: EncodeJob[]
   workFree?: number
+  batches?: EncodeBatch[]
 }
 
 interface PreviewFile {
@@ -226,6 +244,37 @@ const PHASE: Record<string, string> = {
   cancelled: 'Cancelled',
 }
 
+function BatchSummary({ batch: b, onDismiss }: { batch: EncodeBatch; onDismiss: () => void }) {
+  const finished = b.finishedAt != null
+  const counted = b.total - b.remaining
+  const pct = b.originalBytes ? Math.round((100 * b.savedBytes) / b.originalBytes) : 0
+  const notReplaced = [b.skipped && `${b.skipped} skipped`, b.failed && `${b.failed} failed`, b.cancelled && `${b.cancelled} cancelled`].filter(Boolean)
+  const dismiss = () => api.post(`/encode/batches/${b.id}/dismiss`).finally(onDismiss)
+
+  return (
+    <div className={`rounded-md px-3 py-2 flex items-start justify-between gap-3 ${finished ? 'bg-green-900/25 border border-green-900/60' : 'bg-gray-800/50'}`}>
+      <p className="text-xs text-gray-300">
+        {finished ? (
+          <>
+            <span className="text-green-300 font-medium">Batch finished</span> · {b.label}:{' '}
+            <span className="text-green-300 font-semibold">{formatBytes(b.savedBytes)} saved</span>
+            {pct > 0 && <span className="text-gray-500"> ({pct}% of {formatBytes(b.originalBytes)})</span>}
+            <span className="text-gray-500"> · {b.done} of {b.total} replaced{notReplaced.length > 0 && `, ${notReplaced.join(', ')}`}</span>
+          </>
+        ) : (
+          <>
+            <span className="text-white font-medium">Batch</span> · {b.label}: {counted} of {b.total} finished
+            {b.savedBytes > 0 && <> · <span className="text-green-400">{formatBytes(b.savedBytes)} saved so far</span></>}
+          </>
+        )}
+      </p>
+      {finished && (
+        <button onClick={dismiss} className="text-xs text-gray-500 hover:text-white shrink-0" title="Dismiss">✕</button>
+      )}
+    </div>
+  )
+}
+
 export function EncodeJobs({ status }: { status: EncodeStatus }) {
   const queryClient = useQueryClient()
   const [showFinished, setShowFinished] = useState(false)
@@ -246,10 +295,12 @@ export function EncodeJobs({ status }: { status: EncodeStatus }) {
       </div>
     )
   }
-  if (!jobs.length) return null
+  const batches = (status.batches ?? []).filter((b) => !b.dismissed)
+  if (!jobs.length && !batches.length) return null
 
   return (
     <div className="mb-4 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 space-y-2">
+      {batches.map((b) => <BatchSummary key={b.id} batch={b} onDismiss={refresh} />)}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-xs text-gray-400">
           <span className="text-white font-medium">Re-encode</span> on {status.server}

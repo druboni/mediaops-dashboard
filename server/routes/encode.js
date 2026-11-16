@@ -1,7 +1,7 @@
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { reclaimTargets } from './media.js'
-import { encoderServer, sidecar, filesFor, CQ_PRESETS, encodeSweep } from '../encode.js'
+import { encoderServer, sidecar, filesFor, CQ_PRESETS, encodeSweep, startBatch, publicBatches, dismissBatch } from '../encode.js'
 
 // GPU re-encode (see server/encode.js and scripts/encode-sidecar.py).
 //   GET    /status           is an encoder configured, and its jobs
@@ -43,9 +43,9 @@ export default async function encodeRoutes(fastify) {
     if (!server) return { configured: false, presets: CQ_PRESETS }
     try {
       const data = await sidecar(server, '/jobs')
-      return { configured: true, reachable: true, server: server.name, presets: CQ_PRESETS, ...data }
+      return { configured: true, reachable: true, server: server.name, presets: CQ_PRESETS, batches: publicBatches(), ...data }
     } catch (err) {
-      return { configured: true, reachable: false, server: server.name, presets: CQ_PRESETS, error: err.message, jobs: [] }
+      return { configured: true, reachable: false, server: server.name, presets: CQ_PRESETS, error: err.message, jobs: [], batches: publicBatches() }
     }
   })
 
@@ -84,18 +84,26 @@ export default async function encodeRoutes(fastify) {
     }
     let queued = 0
     const errors = [...resolved.errors]
+    const jobIds = [], labels = []
     for (const f of resolved.files) {
       try {
-        await sidecar(server, '/jobs', {
+        const job = await sidecar(server, '/jobs', {
           method: 'POST',
           body: { path: f.path, cq: cq[f.kind], label: f.label, meta: { proxyBase: f.proxyBase, arrId: f.arrId, kind: f.kind } },
         })
         queued += 1
+        if (job?.id) { jobIds.push(job.id); labels.push(f.label) }
       } catch (err) {
         errors.push(`${f.label}: ${err.message}`)
       }
     }
-    return { queued, errors, truncated: resolved.truncated }
+    const batch = startBatch(jobIds, labels)
+    return { queued, errors, truncated: resolved.truncated, batch: batch?.id ?? null }
+  })
+
+  fastify.post('/batches/:id/dismiss', async (request) => {
+    dismissBatch(request.params.id)
+    return { ok: true }
   })
 
   fastify.post('/jobs/:id/cancel', async (request, reply) => {

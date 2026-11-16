@@ -1,3 +1,6 @@
+import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import { getConfig } from './routes/config.js'
 import { addLog } from './logBuffer.js'
 import { reclaimTargets } from './routes/media.js'
@@ -132,6 +135,82 @@ async function plexScan(config, filePath) {
   await fetch(q(`/library/sections/${section.key}/refresh?path=${encodeURIComponent(folder)}`), { signal: AbortSignal.timeout(10000) })
 }
 
+// ── Batches ──────────────────────────────────────────────────────────────────
+// Each press of Queue is a batch: the job ids it queued, tallied as the sweep
+// acks them (exactly once per job), so the panel can say what the whole run
+// saved when its last job finishes.
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const CONFIG_DIR = process.env.CONFIG_PATH ? dirname(process.env.CONFIG_PATH) : join(__dirname, '../config')
+const BATCHES_PATH = join(CONFIG_DIR, 'encode-batches.json')
+const KEEP_BATCHES = 20
+
+function loadBatches() {
+  try { return JSON.parse(readFileSync(BATCHES_PATH, 'utf8')) } catch { return [] }
+}
+function saveBatches(batches) {
+  mkdirSync(dirname(BATCHES_PATH), { recursive: true })
+  writeFileSync(BATCHES_PATH, JSON.stringify(batches.slice(-KEEP_BATCHES), null, 2))
+}
+
+/** "Ghost Adventures", "Ghost Adventures + 2 more" — from job labels like "Show · file.mkv". */
+function batchLabel(labels) {
+  const titles = [...new Set(labels.map((l) => String(l).split(' · ')[0]))]
+  return titles.length <= 1 ? (titles[0] ?? 'Re-encode') : `${titles[0]} + ${titles.length - 1} more`
+}
+
+export function startBatch(jobIds, labels) {
+  if (!jobIds.length) return null
+  const batch = {
+    id: `b${Date.now().toString(36)}`,
+    label: batchLabel(labels),
+    queuedAt: Date.now(),
+    total: jobIds.length,
+    pending: jobIds,
+    done: 0, skipped: 0, failed: 0, cancelled: 0,
+    savedBytes: 0, originalBytes: 0,
+    finishedAt: null,
+    dismissed: false,
+  }
+  saveBatches([...loadBatches(), batch])
+  return batch
+}
+
+export function publicBatches() {
+  return loadBatches().slice(-5).reverse().map(({ pending, ...b }) => ({ ...b, remaining: pending.length }))
+}
+
+export function dismissBatch(id) {
+  saveBatches(loadBatches().map((b) => (b.id === id ? { ...b, dismissed: true } : b)))
+}
+
+function finishBatch(b) {
+  b.finishedAt = Date.now()
+  const parts = [`${b.done} replaced`, b.skipped && `${b.skipped} skipped`, b.failed && `${b.failed} failed`, b.cancelled && `${b.cancelled} cancelled`].filter(Boolean)
+  addLog('info', `[encode] Batch "${b.label}" finished: ${(b.savedBytes / 1e9).toFixed(1)} GB saved (${parts.join(', ')})`, { service: 'system' })
+}
+
+/** Count finished jobs into their batches; jobs gone from the sidecar entirely count as cancelled. */
+function tallyBatches(finishedJobs, liveIds) {
+  const batches = loadBatches()
+  let changed = false
+  for (const b of batches.filter((x) => !x.finishedAt)) {
+    for (const j of finishedJobs.filter((x) => b.pending.includes(x.id))) {
+      b[j.status] = (b[j.status] ?? 0) + 1
+      if (j.status === 'done' && j.origSize && j.newSize) {
+        b.savedBytes += j.origSize - j.newSize
+        b.originalBytes += j.origSize
+      }
+      b.pending = b.pending.filter((id) => id !== j.id)
+      changed = true
+    }
+    const gone = b.pending.filter((id) => !liveIds.has(id))
+    if (gone.length) { b.cancelled += gone.length; b.pending = b.pending.filter((id) => liveIds.has(id)); changed = true }
+    if (!b.pending.length) { finishBatch(b); changed = true }
+  }
+  if (changed) saveBatches(batches)
+}
+
 let running = false
 
 export async function encodeSweep() {
@@ -143,6 +222,8 @@ export async function encodeSweep() {
     if (!server) return
     const { jobs } = await sidecar(server, '/jobs')
     const finished = jobs.filter((j) => !j.acked && ['done', 'skipped', 'failed', 'cancelled'].includes(j.status))
+    // Before acking: a job leaves its batch's pending list when counted, so this can't double-count.
+    tallyBatches(finished, new Set(jobs.map((j) => j.id)))
     const rescanned = new Set()
     for (const j of finished) {
       if (j.status === 'done') {
