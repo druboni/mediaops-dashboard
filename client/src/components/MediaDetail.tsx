@@ -646,11 +646,12 @@ export default function MediaDetail({
           const onUpgradeProfile = data.qualityProfileName === '4K Upgrade'
           const has4kFile = kind === 'movie' && /2160p/i.test(`${data.file?.quality ?? ''} ${data.file?.resolution ?? ''}`)
           const fileWord = kind === 'movie' ? 'file' : 'episodes'
+          const stays = kind === 'movie' ? 'file stays' : 'episodes stay'
           if (onUpgradeProfile) {
             return (
               <div className="mb-3 flex items-center justify-between gap-2">
                 <p className="text-xs text-purple-300">
-                  {has4kFile ? 'Upgraded to 4K' : `4K upgrade pending: the current ${fileWord} stay until a 4K release imports`}
+                  {has4kFile ? 'Upgraded to 4K' : `4K upgrade pending: the current ${stays} until a 4K release imports`}
                 </p>
                 {!has4kFile && (
                   <button
