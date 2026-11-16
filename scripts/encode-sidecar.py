@@ -33,6 +33,7 @@ Then in MediaOps: Settings -> Monitored Servers -> that server -> Encode.
 
 API:
     GET  /jobs                 every job, newest first, plus work-dir free space
+    GET  /history              every finished job ever (history.jsonl): totals + newest 1000
     POST /jobs                 {path, cq?, label?, meta?} -> the job (an existing
                                queued/running job for the same path is returned instead)
     POST /jobs/{id}/cancel     stop a queued or running job (the original is untouched)
@@ -135,6 +136,32 @@ def record_history(job):
                 "id", "path", "outPath", "status", "error", "cq", "origSize", "newSize", "started", "finished", "label")}) + "\n")
     except OSError:
         pass
+
+
+HISTORY_LIMIT = 1000
+
+
+def read_history():
+    """Totals over every finished job ever, plus the newest HISTORY_LIMIT entries."""
+    entries, totals = [], {s: 0 for s in FINISHED}
+    saved = before = 0
+    try:
+        with open(HISTORY) as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                totals[e.get("status")] = totals.get(e.get("status"), 0) + 1
+                if e.get("status") == "done" and e.get("origSize") and e.get("newSize"):
+                    saved += e["origSize"] - e["newSize"]
+                    before += e["origSize"]
+                entries.append(e)
+    except FileNotFoundError:
+        pass
+    entries.sort(key=lambda e: e.get("finished") or 0, reverse=True)
+    return {"entries": entries[:HISTORY_LIMIT], "total": len(entries), "counts": totals,
+            "savedBytes": saved, "originalBytes": before}
 
 
 # ── Paths ──────────────────────────────────────────────────────────────────
@@ -399,6 +426,8 @@ class Handler(BaseHTTPRequestHandler):
                 listing = sorted((public(j) for j in jobs.values()), key=lambda j: j["created"], reverse=True)
             disk = shutil.disk_usage(WORK)
             return self.send(200, {"jobs": listing, "workDir": WORK, "workFree": disk.free, "roots": ROOTS})
+        if path == "/history":
+            return self.send(200, read_history())
         self.send(404, {"error": "not found"})
 
     def do_POST(self):

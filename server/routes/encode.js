@@ -49,6 +49,17 @@ export default async function encodeRoutes(fastify) {
     }
   })
 
+  // Every re-encode ever (the sidecar's history.jsonl), with totals.
+  fastify.get('/history', async (request, reply) => {
+    const server = encoderServer(await getConfig())
+    if (!server) return reply.status(400).send({ error: 'No encoder configured' })
+    try {
+      return await sidecar(server, '/history', { timeout: 20000 })
+    } catch (err) {
+      return reply.status(502).send({ error: err.message })
+    }
+  })
+
   fastify.post('/preview', async (request, reply) => {
     const config = await getConfig()
     const server = encoderServer(config)

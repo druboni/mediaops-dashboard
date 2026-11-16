@@ -324,3 +324,128 @@ export function EncodeJobs({ status }: { status: EncodeStatus }) {
     </div>
   )
 }
+
+interface HistoryEntry {
+  id: string
+  path: string
+  label: string | null
+  status: 'done' | 'skipped' | 'failed' | 'cancelled'
+  error: string | null
+  cq: number | null
+  origSize: number | null
+  newSize: number | null
+  finished: number | null
+}
+
+interface EncodeHistoryData {
+  entries: HistoryEntry[]
+  total: number
+  counts: Record<string, number>
+  savedBytes: number
+  originalBytes: number
+}
+
+const HISTORY_PAGE = 100
+
+// Every re-encode ever, from the encoder's history.jsonl (which, unlike the
+// live job list and MediaOps' log, is never trimmed).
+export function EncodeHistory() {
+  const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState<'all' | 'done' | 'other'>('all')
+  const [query, setQuery] = useState('')
+  const [shown, setShown] = useState(HISTORY_PAGE)
+
+  const { data, error } = useQuery<EncodeHistoryData>({
+    queryKey: ['encode-history'],
+    queryFn: async () => (await api.get('/encode/history')).data,
+    staleTime: 60_000,
+    refetchInterval: open ? 60_000 : false,
+  })
+  if (error || !data || !data.total) return null
+
+  const done = data.counts.done ?? 0
+  const notReplaced = data.total - done
+  const q = query.trim().toLowerCase()
+  const list = data.entries
+    .filter((e) => filter === 'all' || (filter === 'done' ? e.status === 'done' : e.status !== 'done'))
+    .filter((e) => !q || (e.label ?? e.path).toLowerCase().includes(q))
+  const pct = data.originalBytes ? Math.round((100 * data.savedBytes) / data.originalBytes) : 0
+
+  return (
+    <div className="mb-4 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+      <button onClick={() => setOpen((v) => !v)} className="w-full flex items-center justify-between gap-3 text-left">
+        <p className="text-xs text-gray-400">
+          <span className="text-white font-medium">Past re-encodes</span>
+          {' · '}{done} file{done === 1 ? '' : 's'} replaced
+          {' · '}<span className="text-green-400">{formatBytes(data.savedBytes)} saved</span>
+          {pct > 0 && <span className="text-gray-600"> ({pct}% of {formatBytes(data.originalBytes)})</span>}
+          {notReplaced > 0 && <span className="text-gray-500"> · {notReplaced} not replaced</span>}
+        </p>
+        <span className="text-xs text-gray-500 shrink-0">{open ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex rounded border border-gray-700 overflow-hidden text-xs">
+              {([['all', 'All'], ['done', 'Replaced'], ['other', 'Not replaced']] as const).map(([f, label]) => (
+                <button
+                  key={f}
+                  onClick={() => { setFilter(f); setShown(HISTORY_PAGE) }}
+                  className={`px-2.5 py-1 ${filter === f ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setShown(HISTORY_PAGE) }}
+              placeholder="Filter by title"
+              className="text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200 placeholder-gray-600 w-40"
+            />
+            {data.total > data.entries.length && (
+              <span className="text-[11px] text-gray-600">Showing the newest {data.entries.length} of {data.total}</span>
+            )}
+          </div>
+
+          <ul className="text-xs divide-y divide-gray-800/60 max-h-96 overflow-y-auto">
+            {list.slice(0, shown).map((e) => {
+              const saving = e.status === 'done' && e.origSize && e.newSize ? e.origSize - e.newSize : 0
+              return (
+                <li key={e.id} className="py-1.5 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-gray-300 truncate" title={e.path}>{e.label ?? e.path.split('/').pop()}</div>
+                    <div className="text-[11px] text-gray-600">
+                      {e.finished ? new Date(e.finished * 1000).toLocaleString() : '—'}
+                      {e.cq != null && <> · CQ {e.cq}</>}
+                      {e.error && <span className="text-gray-500"> · {e.error}</span>}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right tabular-nums">
+                    {e.status === 'done' ? (
+                      <>
+                        <div className="text-gray-400">{formatBytes(e.origSize ?? 0)} → {formatBytes(e.newSize ?? 0)}</div>
+                        <div className="text-green-400 text-[11px]">
+                          −{formatBytes(saving)}{e.origSize ? ` (${Math.round((100 * saving) / e.origSize)}%)` : ''}
+                        </div>
+                      </>
+                    ) : (
+                      <span className={e.status === 'failed' ? 'text-red-400' : 'text-gray-500'}>{PHASE[e.status]}</span>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+            {!list.length && <li className="py-3 text-gray-600">Nothing matches.</li>}
+          </ul>
+          {list.length > shown && (
+            <button onClick={() => setShown((n) => n + HISTORY_PAGE)} className="text-xs text-gray-500 hover:text-white">
+              Show more ({list.length - shown} left)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

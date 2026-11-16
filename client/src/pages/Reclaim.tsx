@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from '../store/config'
 import api from '../services/api'
 import MediaDetail from '../components/MediaDetail'
-import { ReencodeDialog, EncodeJobs, useEncodeStatus } from '../components/Reencode'
+import { ReencodeDialog, EncodeJobs, EncodeHistory, useEncodeStatus } from '../components/Reencode'
 
 // Disk reclaim — "what can I safely delete?"
 //
@@ -629,6 +629,7 @@ export default function Reclaim() {
       )}
 
       {encodeStatus?.configured && <EncodeJobs status={encodeStatus} />}
+      {encodeStatus?.configured && <EncodeHistory />}
 
       {/* Result / progress banner */}
       {busy && (
