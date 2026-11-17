@@ -9,6 +9,7 @@ interface LanguageItem {
   key: string
   ignoreKey: string
   app: 'sonarr' | 'radarr'
+  reason: 'audio' | 'subs'
   title: string
   seasonNumber?: number
   originalLanguage: string
@@ -112,8 +113,8 @@ export default function WrongLanguage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <p className="text-xs text-gray-500">
           {items.length
-            ? <>{files} file{files === 1 ? '' : 's'} in {items.length} season{items.length === 1 ? '' : 's'}/movie{items.length === 1 ? '' : 's'} with no audio in English or the original language.</>
-            : 'Every file has an audio track in English or its original language.'}
+            ? <>{files} file{files === 1 ? '' : 's'} in {items.length} season{items.length === 1 ? '' : 's'}/movie{items.length === 1 ? '' : 's'} with no audio in English or the original language, or original audio with no English subtitles.</>
+            : 'Every file has English audio, or original audio with English subtitles.'}
           {data?.scannedAt && <span className="text-gray-600"> Scanned {new Date(data.scannedAt).toLocaleTimeString()}.</span>}
           <span className="block text-gray-600 mt-0.5">Replacements are dated back to their air date in Plex, so they don't show up in Recently Added.</span>
         </p>
@@ -157,7 +158,9 @@ export default function WrongLanguage() {
                     {item.audio.map((a) => (
                       <span key={a} className="text-[10px] px-1.5 py-0.5 rounded bg-orange-900/40 text-orange-300 font-mono">{a}</span>
                     ))}
-                    <span className="text-[11px] text-gray-500">instead of {item.originalLanguage}</span>
+                    <span className="text-[11px] text-gray-500">
+                      {item.reason === 'subs' ? 'audio, no English subtitles' : `instead of ${item.originalLanguage}`}
+                    </span>
                   </div>
                   <div className="text-[11px] text-gray-600 truncate mt-0.5 font-mono" title={item.sample}>{item.sample}</div>
                   {result && <div className={`text-xs mt-1 ${result.ok ? 'text-green-400' : 'text-yellow-400'}`}>{result.message}</div>}
@@ -178,7 +181,9 @@ export default function WrongLanguage() {
                         <button
                           onClick={() => setConfirm(item.key)}
                           disabled={!!busy || !!bulk}
-                          title={`Only deletes the files if a ${item.originalLanguage} release is available`}
+                          title={item.reason === 'subs'
+                            ? 'Only deletes the files if a release without foreign tags (MULTi, VOSTFR…) is available'
+                            : `Only deletes the files if a ${item.originalLanguage} release is available`}
                           className="text-xs px-3 py-1 rounded bg-gray-700 hover:bg-blue-700 text-gray-300 hover:text-white disabled:opacity-50"
                         >
                           Replace

@@ -16,6 +16,11 @@ import { trackReplacement } from '../plexAddedAt.js'
 // the original language or English. Untagged or "und" tracks may well be the
 // original, so they never count against a file.
 //
+// A file with original-language audio but no English audio also needs English
+// subtitles, in the file or next to it (Bazarr): a French MULTi anime release
+// has Japanese audio and only French subs. Replacing one of those skips
+// releases whose names mark them as foreign multi-audio (FOREIGN_SUBBED).
+//
 // Replacing first asks the *arr for releases (the same list as an interactive
 // search) and only deletes the file when one exists that the profile would take
 // (custom format score >= 0, rejected for nothing but "not an upgrade" over the
@@ -47,16 +52,59 @@ const CODES = {
   Slovak: ['slo', 'slk', 'sk'], Slovenian: ['slv', 'sl'], Bengali: ['ben', 'bn'], Tamil: ['tam', 'ta'], Telugu: ['tel', 'te'],
 }
 const UNTAGGED = new Set(['', 'und', 'mul', 'zxx', 'qaa', 'unknown'])
+const tracksOf = (list) => String(list ?? '').toLowerCase().split('/').map((t) => t.trim()).filter(Boolean)
 
-/** Original-language name, or null when the file has a track in it or in English / we can't tell. */
-function wrongLanguage(audioLanguages, original) {
-  // English is always fine too: English dubs of anime are wanted, German dubs of English shows aren't.
-  const wanted = CODES[original] && [...CODES[original], ...CODES.English]
-  if (!wanted) return null
-  const tracks = String(audioLanguages ?? '').toLowerCase().split('/').map((t) => t.trim())
-  if (!tracks.length || tracks.some((t) => UNTAGGED.has(t))) return null
-  return tracks.some((t) => wanted.includes(t)) ? null : original
+/**
+ * Why a file is unwatchable, or null when it's fine / we can't tell:
+ *  'audio' - no track in the original language or English (a German dub of an English show)
+ *  'subs'  - original-language audio but no English audio and no English subtitles in the
+ *            file (a French MULTi anime release: French + Japanese audio, French subs).
+ *            External subs are checked separately (Bazarr), see withoutEnglishSubs.
+ * English audio is always fine: English dubs of anime are wanted.
+ */
+function wrongLanguage(mediaInfo, original) {
+  const codes = CODES[original]
+  if (!codes) return null
+  const audio = tracksOf(mediaInfo?.audioLanguages)
+  if (!audio.length || audio.some((t) => UNTAGGED.has(t))) return null
+  if (audio.some((t) => CODES.English.includes(t))) return null
+  if (!audio.some((t) => codes.includes(t))) return 'audio'
+  const subs = tracksOf(mediaInfo?.subtitles)
+  if (subs.some((t) => UNTAGGED.has(t) || CODES.English.includes(t))) return null
+  return 'subs'
 }
+
+const bazarrH = (key) => ({ 'X-API-KEY': key, Accept: 'application/json' })
+/** File paths Bazarr has a full (not forced-only) English subtitle for. */
+async function bazarrEnglishSubs(bazarr, query) {
+  const res = await fetch(`${bazarr.url.replace(/\/$/, '')}/api/${query}`, { headers: bazarrH(bazarr.apiKey), signal: AbortSignal.timeout(30_000) })
+  if (!res.ok) throw new Error(`bazarr ${query}: HTTP ${res.status}`)
+  const paths = new Set()
+  for (const x of (await res.json()).data ?? []) {
+    if ((x.subtitles ?? []).some((s) => s.path && s.code2 === 'en' && !s.forced)) paths.add(x.path)
+  }
+  return paths
+}
+
+/**
+ * Drops 'subs' files that have an external English subtitle. Without Bazarr we
+ * can't see those, so 'subs' files are dropped rather than guessed at.
+ */
+async function withoutEnglishSubs(files, bazarr, query) {
+  if (!files.some((f) => f.reason === 'subs')) return files
+  let have
+  try {
+    if (!bazarr?.enabled) throw new Error('not enabled')
+    have = await bazarrEnglishSubs(bazarr, query)
+  } catch {
+    return files.filter((f) => f.reason !== 'subs')
+  }
+  return files.filter((f) => f.reason !== 'subs' || !have.has(f.path))
+}
+
+// Release names that mean a non-English multi-audio/subbed release, which is how
+// the 'subs' files got here. Replacing one of those skips releases like it.
+const FOREIGN_SUBBED = /\b(multi|french|truefrench|vostfr|subfrench|vff|vf2?|german|ger|ita|spa|esp|latino|castellano|nordic)\b/i
 
 const arr = (svc) => {
   const base = svc.url.replace(/\/$/, '')
@@ -99,22 +147,26 @@ function record(entry) {
 }
 
 // One row per series season or movie: { key, app, ... }.
-async function scanSonarr(svc) {
+async function scanSonarr(svc, bazarr) {
   const call = arr(svc)
   const series = await call('/series')
   const groups = await mapLimit(series, 6, async (s) => {
     const files = await call(`/episodefile?seriesId=${s.id}`).catch(() => [])
+    const flagged = files
+      .map((f) => ({ ...f, reason: wrongLanguage(f.mediaInfo, s.originalLanguage?.name) }))
+      .filter((f) => f.reason)
     const bySeason = new Map()
-    for (const f of files) {
-      const lang = wrongLanguage(f.mediaInfo?.audioLanguages, s.originalLanguage?.name)
-      if (!lang) continue
-      const g = bySeason.get(f.seasonNumber) ?? { files: [], audio: new Set() }
+    for (const f of await withoutEnglishSubs(flagged, bazarr, `episodes?seriesid[]=${s.id}`)) {
+      // A season with both kinds is listed once per kind, since they replace differently.
+      const k = `${f.seasonNumber}:${f.reason}`
+      const g = bySeason.get(k) ?? { season: f.seasonNumber, reason: f.reason, files: [], audio: new Set() }
       g.files.push(f)
       g.audio.add(f.mediaInfo.audioLanguages)
-      bySeason.set(f.seasonNumber, g)
+      bySeason.set(k, g)
     }
-    return [...bySeason].map(([season, g]) => ({
-      key: `sonarr:${s.id}:${season}`,
+    return [...bySeason.values()].map(({ season, reason, ...g }) => ({
+      reason,
+      key: `sonarr:${s.id}:${season}${reason === 'subs' ? ':subs' : ''}`,
       ignoreKey: `sonarr:${s.id}`,
       app: 'sonarr',
       seriesId: s.id,
@@ -131,11 +183,20 @@ async function scanSonarr(svc) {
   return groups.flat()
 }
 
-async function scanRadarr(svc) {
+async function scanRadarr(svc, bazarr) {
   const movies = await arr(svc)('/movie', { timeout: 60_000 })
-  return movies
-    .filter((m) => m.movieFile && wrongLanguage(m.movieFile.mediaInfo?.audioLanguages, m.originalLanguage?.name))
+  const flagged = movies
+    .filter((m) => m.movieFile)
+    .map((m) => ({ ...m, reason: wrongLanguage(m.movieFile.mediaInfo, m.originalLanguage?.name), path: m.movieFile.path }))
+    .filter((m) => m.reason)
+  const subs = flagged.filter((m) => m.reason === 'subs')
+  const kept = new Set(subs.length
+    ? (await withoutEnglishSubs(subs, bazarr, `movies?${subs.map((m) => `radarrid[]=${m.id}`).join('&')}`)).map((m) => m.id)
+    : [])
+  return flagged
+    .filter((m) => m.reason === 'audio' || kept.has(m.id))
     .map((m) => ({
+      reason: m.reason,
       key: `radarr:${m.id}`,
       ignoreKey: `radarr:${m.id}`,
       app: 'radarr',
@@ -157,10 +218,10 @@ async function scan(force = false) {
   if (!force && cache && Date.now() - cache.at < SCAN_TTL_MS) return cache
   if (scanning) return scanning
   scanning = (async () => {
-    const { sonarr, radarr } = (await getConfig()).services
+    const { sonarr, radarr, bazarr } = (await getConfig()).services
     const [s, r] = await Promise.allSettled([
-      sonarr?.enabled ? scanSonarr(sonarr) : [],
-      radarr?.enabled ? scanRadarr(radarr) : [],
+      sonarr?.enabled ? scanSonarr(sonarr, bazarr) : [],
+      radarr?.enabled ? scanRadarr(radarr, bazarr) : [],
     ])
     const errors = [s, r].filter((x) => x.status === 'rejected').map((x) => x.reason.message)
     const items = [...(s.value ?? []), ...(r.value ?? [])].sort((a, b) => a.title.localeCompare(b.title) || (a.seasonNumber ?? 0) - (b.seasonNumber ?? 0))
@@ -176,6 +237,7 @@ async function acceptableReleases(call, item) {
   const releases = await call(`/release?${query}`, { timeout: RELEASE_TIMEOUT_MS })
   return releases
     .filter((r) => (r.customFormatScore ?? 0) >= 0)
+    .filter((r) => item.reason !== 'subs' || !FOREIGN_SUBBED.test(r.title ?? ''))
     .filter((r) => (r.rejections ?? []).every((x) => UPGRADE_ONLY.test(typeof x === 'string' ? x : x.reason ?? '')))
     .sort((a, b) => (b.seeders ?? 0) - (a.seeders ?? 0))
 }
@@ -187,8 +249,9 @@ async function replace(item) {
   const options = await acceptableReleases(call, item)
   const label = item.app === 'sonarr' ? `${item.title} S${item.seasonNumber}` : item.title
   if (!options.length) {
-    addLog('info', `[language] ${label}: no ${item.originalLanguage} release found, kept the files`, { service: item.app })
-    return { replaced: false, message: `No ${item.originalLanguage} release found, files kept` }
+    const what = item.reason === 'subs' ? 'other' : item.originalLanguage
+    addLog('info', `[language] ${label}: no ${what} release found, kept the files`, { service: item.app })
+    return { replaced: false, message: `No ${what} release found, files kept` }
   }
   if (item.app === 'sonarr') {
     const episodes = await call(`/episode?seriesId=${item.seriesId}&seasonNumber=${item.seasonNumber}`)
