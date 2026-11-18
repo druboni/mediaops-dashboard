@@ -5,8 +5,8 @@ import api from '../services/api'
 
 interface HistoryItem {
   id: string
-  service: 'radarr' | 'sonarr' | 'lidarr'
-  type: 'movie' | 'episode' | 'music'
+  service: 'radarr' | 'sonarr' | 'lidarr' | 'listenarr' | 'listenarrMam'
+  type: 'movie' | 'episode' | 'music' | 'audiobook'
   event: string
   eventLabel: string
   title: string
@@ -45,6 +45,7 @@ const TYPE_BADGE: Record<string, string> = {
   movie:   'bg-blue-900/60 text-blue-300',
   episode: 'bg-green-900/60 text-green-300',
   music:   'bg-purple-900/60 text-purple-300',
+  audiobook: 'bg-teal-900/60 text-teal-300',
 }
 
 export default function History() {
@@ -52,7 +53,7 @@ export default function History() {
   const [eventFilter, setEventFilter] = useState<string>('all')
   const [typeFilter, setTypeFilter] = useState<string>('all')
 
-  const enabled = enabledServices.some((s) => ['radarr', 'sonarr', 'lidarr'].includes(s))
+  const enabled = enabledServices.some((s) => ['radarr', 'sonarr', 'lidarr', 'listenarr', 'listenarrMam'].includes(s))
 
   const { data, isLoading } = useQuery<HistoryData>({
     queryKey: ['history'],
@@ -65,7 +66,7 @@ export default function History() {
     return (
       <div className="p-6">
         <h1 className="text-2xl font-bold text-white mb-4">History</h1>
-        <p className="text-gray-500">Enable Radarr, Sonarr, or Lidarr in Settings.</p>
+        <p className="text-gray-500">Enable Radarr, Sonarr, Lidarr or Listenarr in Settings.</p>
       </div>
     )
   }
@@ -82,14 +83,14 @@ export default function History() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">History</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Recent activity across Radarr, Sonarr, and Lidarr</p>
+          <p className="text-sm text-gray-500 mt-0.5">Recent activity across Radarr, Sonarr, Lidarr and Listenarr</p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
-          {(['all', 'movie', 'episode', 'music'] as const).map((t) => (
+          {(['all', 'movie', 'episode', 'music', 'audiobook'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTypeFilter(t)}
@@ -135,7 +136,7 @@ export default function History() {
             <div key={item.id} className="px-4 py-3 flex items-center gap-3">
               <div className="flex items-center gap-2 shrink-0">
                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${TYPE_BADGE[item.type]}`}>
-                  {item.type === 'episode' ? 'TV' : item.type === 'music' ? 'Music' : 'Movie'}
+                  {item.type === 'episode' ? 'TV' : item.type === 'music' ? 'Music' : item.type === 'audiobook' ? 'Audiobook' : 'Movie'}
                 </span>
               </div>
               <div className="flex-1 min-w-0">

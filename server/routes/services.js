@@ -59,7 +59,9 @@ const TEST_ENDPOINT = {
   audiobookshelf: (url, key) => key
     ? { url: `${url}/api/libraries`, headers: { Authorization: `Bearer ${key}` }, expectJson: true }
     : { url: `${url}/status`, headers: {}, expectJson: true },
-  audiobookRequester: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
+  audiobookRequester: (url, key) => key
+    ? { url: `${url}/api/stats`, headers: { 'X-Api-Key': key }, expectJson: true }
+    : { url: `${url}/api/ping`, headers: {}, expectJson: true },
   audiobookshelfDemo: (url) => ({ url: `${url}/status`, headers: {}, expectJson: true }),
   homeshelfWeb: (url) => ({ url: `${url}/api/ping`, headers: {}, expectJson: true }),
   // With the dashboard key, check it against /api/stats; without, just reachability.

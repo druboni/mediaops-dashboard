@@ -43,6 +43,27 @@ interface DashboardData {
     problemSeason: number; problemEpisode: number; commentCount: number
   }[]
   musicRequests?: MusicRequests | { error: string } | null
+  audiobooks?: Audiobooks | null
+}
+
+// Audiobook Requester's /api/stats plus Listenarr's wanted books and who's
+// listening in Audiobookshelf (server/routes/dashboard.js getAudiobooks).
+interface AudiobookRequests {
+  counts: Record<'pending' | 'approved' | 'processing' | 'available' | 'declined' | 'failed', number>
+  total: number
+  completed: { day: number; week: number }
+  stages: Record<'searching' | 'downloading' | 'importing' | 'missing' | 'stuck', number>
+  attention: {
+    id: number; title: string; authors: string[]; user: string
+    status: string; stage: 'missing' | 'stuck' | null
+    problem: string | null; createdAt: string
+  }[]
+}
+interface Audiobooks {
+  requests: AudiobookRequests | { error: string } | null
+  wanted: { title: string; authors: string[]; series: string | null; instance: string }[]
+  listening: { title: string; author: string | null; user: string; device: string | null; currentTime: number; duration: number | null }[]
+  books: number | null
 }
 
 // Plexamp Requester's /api/stats.
@@ -338,6 +359,7 @@ export default function Dashboard() {
           {data.stats.artists != null && <StatCard label="Artists" value={data.stats.artists} />}
           {data.stats.albums  != null && <StatCard label="Albums"  value={data.stats.albums} />}
           {data.stats.tracks  != null && <StatCard label="Tracks"  value={data.stats.tracks} />}
+          {data.audiobooks?.books != null && <StatCard label="Audiobooks" value={data.audiobooks.books} />}
           <StatCard label="Streams"  value={data.stats.plexStreams}      highlight={!!data.stats.plexStreams} />
           <StatCard label="Requests" value={data.stats.pendingRequests}  highlight={!!data.stats.pendingRequests} />
           <StatCard label="Issues"   value={data.stats.openIssues}       highlight={!!data.stats.openIssues} />
@@ -396,6 +418,9 @@ export default function Dashboard() {
           </section>
         )}
 
+      {/* Audiobookshelf listeners */}
+      {!!data.audiobooks?.listening.length && <ListeningSection sessions={data.audiobooks.listening} />}
+
       {/* Download clients overview */}
       {(data.downloads.qbittorrent || data.downloads.qbittorrentMam || data.downloads.nzbget || data.downloads.nzbgetMusic || data.downloads.slskd) && (
         <section className="mb-8">
@@ -415,6 +440,9 @@ export default function Dashboard() {
 
       {/* Music requests from Plexamp Requester */}
       {data.musicRequests && <MusicRequestsSection data={data.musicRequests} />}
+
+      {/* Audiobook requests + Listenarr wanted */}
+      {data.audiobooks && (data.audiobooks.requests || data.audiobooks.wanted.length > 0) && <AudiobooksSection data={data.audiobooks} />}
 
       {/* Reported Issues — someone told us something is broken */}
       {data.openIssues.length > 0 && (
@@ -617,6 +645,120 @@ function MusicRequestsSection({ data }: { data: MusicRequests | { error: string 
           )}
         </div>
       )}
+    </section>
+  )
+}
+
+const BOOK_STAGE: Record<string, [string, string]> = {
+  failed:  ['Failed', 'bg-red-900/60 text-red-300'],
+  stuck:   ['Not in ABS', 'bg-yellow-900/60 text-yellow-300'],
+  missing: ['Not found', 'bg-gray-800 text-gray-400'],
+}
+
+function AudiobooksSection({ data }: { data: Audiobooks }) {
+  const [showAll, setShowAll] = useState(false)
+  const req = data.requests && !('error' in data.requests) ? data.requests : null
+  const reqError = data.requests && 'error' in data.requests ? data.requests.error : null
+  const tiles: [string, number, string?][] = req
+    ? [
+        ['Searching', req.stages.searching],
+        ['Downloading', req.stages.downloading + req.stages.importing, 'text-green-400'],
+        ['Not found', req.stages.missing, 'text-yellow-400'],
+        ['Not in ABS', req.stages.stuck, 'text-yellow-400'],
+        ['Failed', req.counts.failed, 'text-red-400'],
+        ['Pending', req.counts.pending, 'text-blue-400'],
+        ['Done 7 days', req.completed.week],
+        ['Wanted', data.wanted.length, 'text-yellow-400'],
+      ]
+    : [['Wanted', data.wanted.length, 'text-yellow-400']]
+  // Requests that need a look, then Listenarr's wanted books.
+  const rows = [
+    ...(req?.attention ?? []).map((r) => ({
+      key: `r${r.id}`,
+      badge: BOOK_STAGE[r.status === 'failed' ? 'failed' : r.stage ?? 'missing'] ?? BOOK_STAGE.missing,
+      title: r.title, by: r.authors.join(', '), problem: r.problem,
+      right: `${r.user} · ${daysSince(r.createdAt) < 1 ? 'today' : `${daysSince(r.createdAt)}d`}`,
+    })),
+    ...data.wanted.map((b, i) => ({
+      key: `w${i}`,
+      badge: ['Wanted', 'bg-gray-800 text-gray-400'] as [string, string],
+      title: b.title, by: b.authors.join(', '), problem: b.series,
+      right: b.instance,
+    })),
+  ]
+  const shown = showAll ? rows : rows.slice(0, 6)
+  return (
+    <section className="mb-8">
+      <div className="flex items-baseline justify-between">
+        <h2 className="section-label">Audiobooks</h2>
+        {req && <span className="text-xs text-gray-600">{req.total.toLocaleString()} requests</span>}
+      </div>
+      {reqError && <p className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 mb-3 text-xs text-red-400">Audiobook Requester: {reqError}</p>}
+      <div className={`grid gap-2 mb-3 ${req ? 'grid-cols-4 lg:grid-cols-8' : 'grid-cols-4'}`}>
+        {tiles.map(([label, n, color]) => (
+          <div key={label} className="bg-gray-900 border border-gray-800 rounded-lg px-2 sm:px-3 py-2 min-w-0">
+            <p className={`text-lg sm:text-xl font-bold tabular-nums ${n && color ? color : 'text-white'}`}>{n.toLocaleString()}</p>
+            <p className="text-[10px] sm:text-[11px] text-gray-500 truncate">{label}</p>
+          </div>
+        ))}
+      </div>
+      {rows.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+          {shown.map((r) => (
+            <div key={r.key} className="px-4 py-2.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded font-medium ${r.badge[1]}`}>{r.badge[0]}</span>
+                <div className="min-w-0">
+                  <p className="text-sm text-white truncate">
+                    {r.title}{r.by && <span className="text-gray-500"> · {r.by}</span>}
+                  </p>
+                  {r.problem && <p className="text-xs text-gray-500 truncate">{r.problem}</p>}
+                </div>
+              </div>
+              <span className="text-xs text-gray-600 shrink-0">{r.right}</span>
+            </div>
+          ))}
+          {rows.length > 6 && (
+            <button onClick={() => setShowAll((v) => !v)} className="w-full px-4 py-2 text-xs text-gray-500 hover:text-white text-left">
+              {showAll ? 'Show fewer' : `Show ${rows.length - 6} more`}
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ListeningSection({ sessions }: { sessions: Audiobooks['listening'] }) {
+  return (
+    <section className="mb-8">
+      <h2 className="section-label">Listening Now</h2>
+      <div className="bg-gray-900 border border-gray-800 rounded-lg divide-y divide-gray-800">
+        {sessions.map((s, i) => {
+          const pct = s.duration ? Math.min(100, Math.round((s.currentTime / s.duration) * 100)) : null
+          return (
+            <div key={i} className="px-4 py-3 space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-white truncate">{s.title}{s.author && <span className="text-gray-500"> · {s.author}</span>}</p>
+                  <p className="text-xs text-gray-500">{s.user}{s.device ? ` · ${s.device}` : ''}</p>
+                </div>
+                <span className="text-[10px] shrink-0 mt-0.5 px-1.5 py-0.5 rounded font-medium bg-teal-900/60 text-teal-300">Audiobookshelf</span>
+              </div>
+              {s.duration != null && (
+                <>
+                  <div className="flex justify-end text-xs text-gray-500 tabular-nums">
+                    {formatDuration(s.currentTime * 1000)} / {formatDuration(s.duration * 1000)}
+                  </div>
+                  <div className="w-full bg-gray-800 rounded-full h-0.5">
+                    <div className="bg-teal-500 h-0.5 rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </section>
   )
 }

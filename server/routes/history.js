@@ -23,6 +23,15 @@ const EVENT_LABELS = {
   movieFileRenamed:      'Renamed',
 }
 
+// Listenarr event type -> the *arr one it corresponds to.
+const LISTENARR_EVENTS = {
+  Grabbed: 'grabbed',
+  Imported: 'downloadFolderImported',
+  DownloadFailed: 'downloadFailed',
+  ImportFailed: 'downloadFailed',
+  Failed: 'downloadFailed',
+}
+
 export default async function historyRoutes(fastify) {
   fastify.addHook('preHandler', requireAuth)
 
@@ -105,6 +114,38 @@ export default async function historyRoutes(fastify) {
           quality: r.quality?.quality?.name || null,
           date: r.date,
           successful: r.eventType !== 'downloadFailed',
+        })
+      }
+    }
+
+    // Listenarr (both instances). Its history is mostly file/scan bookkeeping;
+    // only the events that match the *arr ones are shown, under the same keys.
+    const audiobookResults = await Promise.allSettled(
+      ['listenarr', 'listenarrMam']
+        .filter((n) => config.services[n]?.enabled)
+        .map(async (n) => {
+          const svc = config.services[n]
+          const res = await safeFetch(`${svc.url.replace(/\/$/, '')}/api/v1/history?pageSize=${Math.max(pageSize, 200)}`, { headers: arrH(svc.apiKey) })
+          return { n, records: res.ok ? res.data?.history ?? [] : [] }
+        })
+    )
+    for (const r of audiobookResults) {
+      if (r.status !== 'fulfilled') continue
+      for (const h of r.value.records) {
+        const event = LISTENARR_EVENTS[h.eventType]
+        if (!event) continue
+        items.push({
+          id: `${r.value.n}-${h.id}`,
+          service: r.value.n,
+          type: 'audiobook',
+          event,
+          eventLabel: EVENT_LABELS[event],
+          title: h.audiobookTitle || h.sourceTitle || '—',
+          subtitle: r.value.n === 'listenarrMam' ? 'MAM' : null,
+          quality: null,
+          // Listenarr's timestamps are UTC without a zone.
+          date: /[zZ]|[+-]\d\d:?\d\d$/.test(h.timestamp) ? h.timestamp : `${h.timestamp}Z`,
+          successful: event !== 'downloadFailed' && h.outcome !== 'Failed',
         })
       }
     }

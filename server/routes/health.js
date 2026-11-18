@@ -96,6 +96,36 @@ export default async function healthRoutes(fastify) {
       }
     }
 
+    // Listenarr has no health endpoint, so check what it would warn about:
+    // root folders it can't use, and downloads that haven't finished in a day.
+    // (Completed items stay in its queue while they seed; that's normal.)
+    const LISTENARR = { listenarr: 'Listenarr', listenarrMam: 'Listenarr (MAM)' }
+    const STALLED_MS = 24 * 3600_000
+    await Promise.allSettled(Object.entries(LISTENARR).filter(([n]) => on(n)).map(async ([n, label]) => {
+      const [folders, queue] = await Promise.all([
+        safeFetch(baseUrl(n) + '/api/v1/rootfolders', apiKey(n)),
+        safeFetch(baseUrl(n) + '/api/v1/download/queue', apiKey(n)),
+      ])
+      for (const f of Array.isArray(folders) ? folders : []) {
+        if (f.storageState && f.storageState !== 'Healthy') {
+          alerts.push({ service: n, level: 'warning', source: 'rootfolder', message: `${label}: root folder "${f.name}" (${f.path}) is ${f.storageState}${f.storageReason && f.storageReason !== 'None' ? ` (${f.storageReason})` : ''}` })
+        }
+      }
+      for (const q of queue?.items ?? []) {
+        if (q.status === 'completed') continue
+        const added = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(q.addedAt ?? '') ? q.addedAt : `${q.addedAt}Z`)
+        const failed = /fail|error|warning/i.test(q.status ?? '')
+        if (!failed && !(Date.now() - added > STALLED_MS)) continue
+        const days = Math.floor((Date.now() - added) / 86_400_000)
+        alerts.push({
+          service: n,
+          level: failed ? 'error' : 'warning',
+          source: 'queue',
+          message: `${label}: "${q.title}" ${failed ? `download ${q.status}` : `still ${q.status} after ${days} day${days === 1 ? '' : 's'}`} (${q.downloadClient ?? 'download client'})`,
+        })
+      }
+    }))
+
     // Prowlarr: temporarily disabled indexers
     let indexerStatus = []
     if (on('prowlarr')) {

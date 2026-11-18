@@ -174,12 +174,57 @@ async function getJsonHealth(url, path, headers = {}, extractVersion = null) {
 
 // Plexamp Requester's /api/stats needs the dashboard key from its Settings page.
 // Without one there's nothing to show beyond the /api/ping health check.
-async function getMusicRequests(url, key) {
+// Audiobook Requester's has the same shape (books instead of albums).
+async function getMusicRequests(url, key, app = 'Plexamp Requester', minVersion = '0.8.0') {
   if (!key) return null
   const r = await safeFetch(`${url}/api/stats`, { headers: { 'X-Api-Key': key } }, 10_000)
-  if (!r.ok) return { error: r.error === 'HTTP 401' ? 'API key rejected — copy it again from Plexamp Requester → Settings' : r.error }
-  if (typeof r.data !== 'object' || !r.data?.counts) return { error: 'This Plexamp Requester is too old for request stats (needs v0.8.0)' }
+  if (!r.ok) return { error: r.error === 'HTTP 401' ? `API key rejected — copy it again from ${app} → Settings` : r.error }
+  if (typeof r.data !== 'object' || !r.data?.counts) return { error: `This ${app} is too old for request stats (needs v${minVersion})` }
   return r.data
+}
+
+// Audiobook side of the dashboard, from whichever of these are set up:
+//  - Audiobook Requester /api/stats (needs its dashboard key; same shape as the music one)
+//  - Listenarr + Listenarr (MAM): monitored books with no file yet ("wanted")
+//  - Audiobookshelf: who's listening now, and how many books there are
+async function getAudiobooks(svcs, on, at) {
+  const abs = on('audiobookshelf') && at('audiobookshelf').key ? at('audiobookshelf') : null
+  const absH = abs ? { Authorization: `Bearer ${abs.key}` } : null
+  const listenarrs = [['listenarr', 'Listenarr'], ['listenarrMam', 'MAM']].filter(([n]) => on(n))
+
+  const [requests, wantedLists, online, users, libraries] = await Promise.all([
+    on('audiobookRequester') ? getMusicRequests(at('audiobookRequester').url, at('audiobookRequester').key, 'Audiobook Requester', '0.12.0') : null,
+    Promise.all(listenarrs.map(async ([n, label]) => {
+      const r = await safeFetch(`${at(n).url}/api/v1/library`, { headers: arrH(at(n).key) }, 15_000)
+      if (!r.ok || !Array.isArray(r.data)) return []
+      return r.data
+        .filter((b) => b.monitored && b.wanted !== false && !b.fileCount && b.status !== 'quality-match')
+        .map((b) => ({ title: b.title, authors: b.authors ?? [], series: b.series ? `${b.series}${b.seriesNumber ? ` #${b.seriesNumber}` : ''}` : null, instance: label }))
+    })),
+    absH ? safeFetch(`${abs.url}/api/users/online`, { headers: absH }) : null,
+    absH ? safeFetch(`${abs.url}/api/users`, { headers: absH }) : null,
+    absH ? safeFetch(`${abs.url}/api/libraries`, { headers: absH }) : null,
+  ])
+  if (!requests && !listenarrs.length && !abs) return null
+
+  const names = new Map((users?.ok ? users.data?.users ?? [] : []).map((u) => [u.id, u.username]))
+  const listening = (online?.ok ? online.data?.openSessions ?? [] : []).map((s) => ({
+    title: s.displayTitle || s.mediaMetadata?.title || 'Unknown',
+    author: s.displayAuthor || null,
+    user: s.user?.username || names.get(s.userId) || 'Someone',
+    device: s.deviceInfo?.clientName || s.deviceInfo?.deviceName || null,
+    currentTime: s.currentTime ?? 0,
+    duration: s.duration ?? null,
+  }))
+
+  let books = null
+  if (libraries?.ok) {
+    const bookLibs = (libraries.data?.libraries ?? []).filter((l) => l.mediaType === 'book')
+    const totals = await Promise.all(bookLibs.map((l) => safeFetch(`${abs.url}/api/libraries/${l.id}/items?limit=1`, { headers: absH })))
+    if (totals.every((t) => t.ok)) books = totals.reduce((n, t) => n + (t.data?.total ?? 0), 0)
+  }
+
+  return { requests, wanted: wantedLists.flat(), listening, books }
 }
 
 // 0=other, 1=video, 2=audio, 3=subtitles, 4=not available — matches the labels
@@ -370,7 +415,7 @@ export default async function dashboardRoutes(fastify) {
 
     const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, nzbgetMusic, huntarr, requestrr, tautulli, plexDisk,
       qbitMam, listenarr, listenarrMam, audiobookshelf, audiobookRequester,
-      audiobookshelfDemo, homeshelfWeb, plexampRequester, wizarr, slskd, soularr, musicRequests] =
+      audiobookshelfDemo, homeshelfWeb, plexampRequester, wizarr, slskd, soularr, musicRequests, audiobooks] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -399,6 +444,7 @@ export default async function dashboardRoutes(fastify) {
         on('slskd')        ? getSlskdDashboard(at('slskd').url, at('slskd').key)          : null,
         on('soularr')      ? getSimpleHealth(at('soularr').url, '/')                      : null,
         on('plexampRequester') ? getMusicRequests(at('plexampRequester').url, at('plexampRequester').key) : null,
+        getAudiobooks(svcs, on, at),
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
@@ -478,6 +524,7 @@ export default async function dashboardRoutes(fastify) {
       pendingRequests: overseerr?.pendingRequests || [],
       openIssues: overseerr?.openIssues || [],
       musicRequests,
+      audiobooks,
     }
   })
 }

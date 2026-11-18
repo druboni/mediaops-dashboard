@@ -29,7 +29,7 @@ const SERVICE_META: Record<ServiceName, ServiceMeta> = {
   listenarr:   { label: 'Listenarr',    category: 'Audiobooks',       placeholder: 'http://192.168.1.x:8686',  keyLabel: 'API Key' },
   listenarrMam: { label: 'Listenarr (MAM)', category: 'Audiobooks',   placeholder: 'http://192.168.1.x:8688',  keyLabel: 'API Key' },
   audiobookshelf: { label: 'Audiobookshelf', category: 'Audiobooks',  placeholder: 'http://192.168.1.x:13378', keyLabel: 'API Key (optional)' },
-  audiobookRequester: { label: 'Audiobook Requester', category: 'Audiobooks', placeholder: 'http://192.168.1.x:5066', keyLabel: 'API Key (not needed)' },
+  audiobookRequester: { label: 'Audiobook Requester', category: 'Audiobooks', placeholder: 'http://192.168.1.x:5066', keyLabel: 'Dashboard API Key (optional)' },
   audiobookshelfDemo: { label: 'Audiobookshelf (Demo)', category: 'Audiobooks', placeholder: 'https://demo.example.com', keyLabel: 'API Key (not needed)' },
   homeshelfWeb: { label: 'Homeshelf Web', category: 'Audiobooks', placeholder: 'http://192.168.1.x:5067', keyLabel: 'API Key (not needed)' },
   plexampRequester: { label: 'Plexamp Requester', category: 'Requests', placeholder: 'http://192.168.1.x:5065', keyLabel: 'Dashboard API Key (optional)' },
