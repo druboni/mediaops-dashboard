@@ -112,7 +112,8 @@ export default async function healthRoutes(fastify) {
         }
       }
       for (const q of queue?.items ?? []) {
-        if (q.status === 'completed') continue
+        // Finished torrents the client won't seed show as "queued" at 100%; not a problem.
+        if (q.status === 'completed' || (q.progress ?? 0) >= 100) continue
         const added = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(q.addedAt ?? '') ? q.addedAt : `${q.addedAt}Z`)
         const failed = /fail|error|warning/i.test(q.status ?? '')
         if (!failed && !(Date.now() - added > STALLED_MS)) continue
