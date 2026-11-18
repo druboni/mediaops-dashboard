@@ -152,6 +152,10 @@ export default async function historyRoutes(fastify) {
 
     items.sort((a, b) => new Date(b.date) - new Date(a.date))
 
-    return { items: items.slice(0, 100) }
+    // Audiobook events are few and far between; keep them even when TV and
+    // movie activity fills the newest 100, so the Audiobook filter isn't empty.
+    const top = items.slice(0, 100)
+    const books = items.slice(100).filter((i) => i.type === 'audiobook').slice(0, 50)
+    return { items: [...top, ...books] }
   })
 }
