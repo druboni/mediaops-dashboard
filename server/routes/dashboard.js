@@ -318,6 +318,10 @@ async function getPlexData(url, token) {
       const playMethod = isTranscoding ? 'transcode' : (ts ? 'direct stream' : 'direct play')
       return {
         title: m.type === 'episode' ? `${m.grandparentTitle} · ${m.title}` : m.title,
+        // "S02E05" for episodes (Plex: parentIndex = season, index = episode).
+        episode: m.type === 'episode' && m.index != null
+          ? `${m.parentIndex != null ? `S${String(m.parentIndex).padStart(2, '0')}` : ''}E${String(m.index).padStart(2, '0')}`
+          : null,
         user: m.User?.title || 'Unknown',
         player: m.Player?.title || 'Unknown',
         platform: m.Player?.platform || null,

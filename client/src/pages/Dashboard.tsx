@@ -28,7 +28,7 @@ interface DashboardData {
     slskd?:      { ok: boolean; dlSpeed: number; active: number } | null
   }
   plexStreams: {
-    title: string; user: string; player: string; platform: string | null; state: string
+    title: string; episode?: string | null; user: string; player: string; platform: string | null; state: string
     viewOffset: number; duration: number | null
     videoCodec: string | null; videoResolution: string | null; audioCodec: string | null
     playMethod: string
@@ -394,7 +394,10 @@ export default function Dashboard() {
                   <div key={i} className="px-4 py-3 space-y-2">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm text-white truncate">{s.title}</p>
+                        <p className="text-sm text-white truncate">
+                          {s.episode && <span className="text-[11px] font-medium text-gray-300 bg-gray-800 rounded px-1.5 py-0.5 mr-2 tabular-nums">{s.episode}</span>}
+                          {s.title}
+                        </p>
                         <p className="text-xs text-gray-500">{s.user} · {s.player}{s.platform ? ` (${s.platform})` : ''}</p>
                       </div>
                       <span className={`text-xs shrink-0 mt-0.5 ${s.state === 'playing' ? 'text-green-400' : 'text-yellow-400'}`}>{s.state}</span>
