@@ -337,11 +337,11 @@ export default function Dashboard() {
         <h2 className="section-label">Service Health</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
           {(Object.entries(data.health) as [ServiceName, HealthEntry][]).map(([name, h]) => (
-            <div key={name} title={h.ok ? (h.version ? `v${h.version}` : 'Online') : h.error} className={`bg-gray-900 border rounded-lg px-3 py-2.5 flex items-center gap-2 ${h.ok ? 'border-gray-700' : 'border-red-900/60'}`}>
+            <div key={name} title={h.ok ? (h.version ? showVersion(h.version) : 'Online') : h.error} className={`bg-gray-900 border rounded-lg px-3 py-2.5 flex items-center gap-2 ${h.ok ? 'border-gray-700' : 'border-red-900/60'}`}>
               <span className={`w-2 h-2 rounded-full shrink-0 ${h.ok ? 'bg-green-400' : 'bg-red-500'}`} />
               <div className="min-w-0">
                 <p className="text-xs font-medium text-white truncate">{SERVICE_LABELS[name] ?? name}</p>
-                {h.version && <p className="text-[10px] text-gray-600">v{h.version}</p>}
+                {h.version && <p className="text-[10px] text-gray-600 truncate">{showVersion(h.version)}</p>}
                 {!h.ok && <p className="text-[10px] text-red-500 truncate">{h.error}</p>}
               </div>
             </div>
@@ -651,6 +651,9 @@ function MusicRequestsSection({ data }: { data: MusicRequests | { error: string 
     </section>
   )
 }
+
+// "2.38.0" → "v2.38.0"; a build with no version number ("main@33116da") as it is.
+const showVersion = (v: string) => (/^\d/.test(v) ? `v${v}` : v)
 
 const BOOK_STAGE: Record<string, [string, string]> = {
   failed:  ['Failed', 'bg-red-900/60 text-red-300'],

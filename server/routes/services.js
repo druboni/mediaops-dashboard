@@ -68,7 +68,10 @@ const TEST_ENDPOINT = {
   plexampRequester: (url, key) => key
     ? { url: `${url}/api/stats`, headers: { 'X-Api-Key': key }, expectJson: true }
     : { url: `${url}/api/ping`, headers: {}, expectJson: true },
-  wizarr:    (url)      => ({ url: `${url}/`,                     headers: {} }),
+  // With a Wizarr API key, check it against /api/version; without, just reachability.
+  wizarr:    (url, key) => key
+    ? { url: `${url}/api/version`, headers: { 'X-API-Key': key }, expectJson: true }
+    : { url: `${url}/health`, headers: {}, expectJson: true },
   slskd:     (url, key) => ({ url: `${url}/api/v0/application`, headers: { 'X-API-Key': key }, expectJson: true }),
   soularr:   (url)      => ({ url: `${url}/`,                     headers: {} }),
   huntarr:   (url, key) => ({ url: `${url}/api/v1/system/status`, headers: { 'X-Api-Key': key } }),

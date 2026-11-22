@@ -35,7 +35,7 @@ const SERVICE_META: Record<ServiceName, ServiceMeta> = {
   plexampRequester: { label: 'Plexamp Requester', category: 'Requests', placeholder: 'http://192.168.1.x:5065', keyLabel: 'Dashboard API Key (optional)' },
   slskd:       { label: 'slskd (Soulseek)', category: 'Download Clients', placeholder: 'http://192.168.1.x:5030', keyLabel: 'API Key' },
   soularr:     { label: 'Soularr',      category: 'Download Clients', placeholder: 'http://192.168.1.x:8265',  keyLabel: 'API Key (not needed)' },
-  wizarr:      { label: 'Wizarr',       category: 'Utilities',        placeholder: 'http://192.168.1.x:5690',  keyLabel: 'API Key (not needed)' },
+  wizarr:      { label: 'Wizarr',       category: 'Utilities',        placeholder: 'http://192.168.1.x:5690',  keyLabel: 'API Key (optional, shows the version)' },
   huntarr:     { label: 'Huntarr',      category: 'Utilities',        placeholder: 'http://192.168.1.x:9705',  keyLabel: 'API Key' },
   requestrr:   { label: 'Requestrr',    category: 'Utilities',        placeholder: 'http://192.168.1.x:4545',  keyLabel: 'API Key' },
   tautulli:    { label: 'Tautulli',     category: 'Media Server',     placeholder: 'http://192.168.1.x:8181',  keyLabel: 'API Key' },

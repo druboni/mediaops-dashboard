@@ -185,7 +185,7 @@ function dockerError({ status, body }) {
   return new Error(msg)
 }
 
-async function dockerApiGet(target, path) {
+export async function dockerApiGet(target, path) {
   const res = await dockerRequest(target, 'GET', path, 5000)
   if (target && res.status >= 400) throw dockerError(res)
   try { return JSON.parse(res.body.toString('utf8')) }

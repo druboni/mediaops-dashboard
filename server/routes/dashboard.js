@@ -5,6 +5,7 @@ import { enrichWithTitles } from './overseerr.js'
 import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 import { getSlskdDashboard } from '../slskd.js'
+import { dockerApiGet } from './system.js'
 
 // See server/routes/health.js for the full explanation — same optional mount path.
 const PLEX_MOUNT_PATH = process.env.PLEX_MOUNT_PATH || '/mnt/plex'
@@ -170,6 +171,37 @@ async function getJsonHealth(url, path, headers = {}, extractVersion = null) {
   if (typeof r.data !== 'object' || r.data === null) return { health: { ok: false, error: 'Not an API response — check the URL' } }
   const version = extractVersion ? extractVersion(r.data) : null
   return { health: { ok: true, ...(version ? { version } : {}) } }
+}
+
+/**
+ * For apps with no version anywhere over HTTP (Soularr): the version label of
+ * the image a container on this machine runs, through the local Docker socket.
+ * Images built from a branch say "main", so those show the commit instead.
+ */
+async function imageVersion(container) {
+  try {
+    const list = await dockerApiGet(null, `/containers/json?filters=${encodeURIComponent(JSON.stringify({ name: [container] }))}`)
+    const c = list.find((x) => x.Names?.includes(`/${container}`))
+    const labels = c?.Labels ?? {}
+    const v = labels['org.opencontainers.image.version']
+    const rev = labels['org.opencontainers.image.revision']
+    if (v && /^v?\d/.test(v)) return v.replace(/^v/, '')
+    if (rev) return `${v ? `${v}@` : ''}${rev.slice(0, 7)}`
+    return v || null
+  } catch { return null }
+}
+
+/** Health from one call, plus a version from another that never makes the app look down. */
+async function withVersion(healthPromise, versionPromise) {
+  const [h, version] = await Promise.all([healthPromise, versionPromise.catch(() => null)])
+  return h?.health?.ok && version && !h.health.version ? { ...h, health: { ...h.health, version } } : h
+}
+
+// Wizarr's /health is open; /api/version needs a Wizarr API key (Settings → API Keys).
+async function wizarrVersion(url, key) {
+  if (!key) return null
+  const r = await safeFetch(`${url}/api/version`, { headers: { 'X-API-Key': key } })
+  return r.ok && typeof r.data?.version === 'string' ? r.data.version : null
 }
 
 // Plexamp Requester's /api/stats needs the dashboard key from its Settings page.
@@ -444,9 +476,9 @@ export default async function dashboardRoutes(fastify) {
         on('audiobookshelfDemo') ? getJsonHealth(at('audiobookshelfDemo').url, '/status', {}, d => d?.serverVersion) : null,
         on('homeshelfWeb') ? getJsonHealth(at('homeshelfWeb').url, '/api/ping', {}, d => d?.version) : null,
         on('plexampRequester') ? getJsonHealth(at('plexampRequester').url, '/api/ping', {}, d => d?.version) : null,
-        on('wizarr')       ? getSimpleHealth(at('wizarr').url, '/')                       : null,
+        on('wizarr')       ? withVersion(getSimpleHealth(at('wizarr').url, '/health'), wizarrVersion(at('wizarr').url, at('wizarr').key)) : null,
         on('slskd')        ? getSlskdDashboard(at('slskd').url, at('slskd').key)          : null,
-        on('soularr')      ? getSimpleHealth(at('soularr').url, '/')                      : null,
+        on('soularr')      ? withVersion(getSimpleHealth(at('soularr').url, '/'), imageVersion('soularr')) : null,
         on('plexampRequester') ? getMusicRequests(at('plexampRequester').url, at('plexampRequester').key) : null,
         getAudiobooks(svcs, on, at),
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
