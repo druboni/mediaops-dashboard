@@ -40,7 +40,15 @@ function save(state) {
 }
 
 const label = (mount) => (mount === '/' ? 'OS' : mount.split(/[/\\]/).filter(Boolean).pop() || mount)
-const tb = (bytes) => (bytes >= 1e12 ? `${(bytes / 1e12).toFixed(1)} TB` : `${Math.round(bytes / 1e9)} GB`)
+// Binary units, like the Storage card's sizes.
+export const driveSize = (bytes) => (bytes >= 2 ** 40 ? `${(bytes / 2 ** 40).toFixed(1)} TB` : `${Math.round(bytes / 2 ** 30)} GB`)
+// Relative, because the container's clock is UTC and the reader's isn't.
+const ago = (ms) => {
+  const min = Math.round(ms / 60_000)
+  if (min < 90) return `${min} minute${min === 1 ? '' : 's'} ago`
+  const h = Math.round(min / 60)
+  return h < 48 ? `${h} hours ago` : `${Math.round(h / 24)} days ago`
+}
 
 // The server's data drives right now, or null when Glances didn't answer (a
 // server that's down says nothing about its drives).
@@ -91,10 +99,10 @@ export async function checkDrives(now = Date.now()) {
   save(state)
 
   for (const e of events) {
-    const name = `${e.drive.label} (${e.mount}, ${tb(e.drive.total)})`
+    const name = `${e.drive.label} (${e.mount}, ${driveSize(e.drive.total)})`
     if (e.type === 'missing') {
-      const since = new Date(e.drive.lastSeen).toLocaleString()
-      addLog('error', `[driveWatch] ${e.server.name}: drive ${name} is missing, last seen ${since}`, { service: 'system' })
+      const since = ago(now - e.drive.lastSeen)
+      addLog('error', `[driveWatch] ${e.server.name}: drive ${name} is missing, last seen ${new Date(e.drive.lastSeen).toISOString()}`, { service: 'system' })
       await sendAlert(
         `Drive missing on ${e.server.name}`,
         `${name} has disappeared (last seen ${since}). If it's part of the Plex pool, files on it will look deleted: ` +
