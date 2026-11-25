@@ -2,6 +2,7 @@ import http from 'http'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { addLog } from '../logBuffer.js'
+import { missingDrives, forgetDrive } from '../driveWatch.js'
 
 // See server/routes/health.js for the full explanation — same optional mount path.
 const PLEX_MOUNT_PATH = process.env.PLEX_MOUNT_PATH || '/mnt/plex'
@@ -391,6 +392,7 @@ export default async function systemRoutes(fastify) {
   fastify.get('/', async () => {
     const config = await getConfig()
     const monitored = config.monitoredServers ?? []
+    const missing = missingDrives()
 
     const [serverResults, containers] = await Promise.allSettled([
       Promise.allSettled(
@@ -414,6 +416,7 @@ export default async function systemRoutes(fastify) {
             ...restStats,
             gpu: customGpu ?? nativeGpu,
             hasSpeedtest: !!s.speedtestPort,
+            missingDrives: missing[s.id] ?? [],
           }
         })
       ),
@@ -453,6 +456,14 @@ export default async function systemRoutes(fastify) {
     }
     return s
   }
+
+  // A drive taken out on purpose: stop alerting about it.
+  fastify.delete('/servers/:id/drives', async (request, reply) => {
+    const { mount } = request.query
+    if (!mount) return reply.status(400).send({ error: 'mount is required' })
+    if (!forgetDrive(request.params.id, mount)) return reply.status(404).send({ error: 'No such drive' })
+    return { ok: true }
+  })
 
   fastify.post('/containers/:id/restart', async (request, reply) => {
     const { id } = request.params

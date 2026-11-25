@@ -1,6 +1,7 @@
 import { statfs } from 'fs/promises'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
+import { missingDrives } from '../driveWatch.js'
 
 // Optional — only relevant if you mount your media library volume into the
 // container and want a low-disk-space alert. Defaults to /mnt/plex to match
@@ -51,6 +52,18 @@ export default async function healthRoutes(fastify) {
         if (item.type === 'warning' || item.type === 'error') {
           alerts.push({ service: r.value.name, level: item.type, source: item.source, message: item.message })
         }
+      }
+    }
+
+    // Drives that have disappeared from a monitored server (see driveWatch.js).
+    const missing = missingDrives()
+    for (const s of config.monitoredServers ?? []) {
+      for (const d of missing[s.id] ?? []) {
+        const size = d.total >= 1e12 ? `${(d.total / 1e12).toFixed(1)} TB` : `${Math.round(d.total / 1e9)} GB`
+        alerts.push({
+          service: 'storage', level: 'error', source: 'drive',
+          message: `Drive missing on ${s.name}: ${d.label} (${d.mount}, ${size}), last seen ${new Date(d.lastSeen).toLocaleString()}`,
+        })
       }
     }
 

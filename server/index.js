@@ -31,6 +31,7 @@ import { startDeadTorrentSweep } from './deadTorrents.js'
 import { startBadFileSweep } from './badFiles.js'
 import { startPlexAddedAtSweep } from './plexAddedAt.js'
 import { startEncodeSweep } from './encode.js'
+import { startDriveWatch } from './driveWatch.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -100,3 +101,4 @@ startDeadTorrentSweep()
 startBadFileSweep()
 startPlexAddedAtSweep()
 startEncodeSweep()
+startDriveWatch()

@@ -67,6 +67,14 @@ interface ServerStats {
   gpu: GpuInfo | null
   processList: ProcessInfo[]
   hasSpeedtest: boolean
+  missingDrives?: MissingDrive[]
+}
+
+interface MissingDrive {
+  mount: string
+  label: string
+  total: number
+  lastSeen: number
 }
 
 interface ContainerInfo {
@@ -142,6 +150,43 @@ function GpuProcessBadge({ name }: { name: string }) {
     return <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/50 text-violet-300 font-medium shrink-0">GPU</span>
   }
   return null
+}
+
+// Drives this server used to have that are gone now (server/driveWatch.js).
+function MissingDrives({ serverId, drives }: { serverId: string; drives: MissingDrive[] }) {
+  const queryClient = useQueryClient()
+  const forget = useMutation({
+    mutationFn: (mount: string) => api.delete(`/system/servers/${encodeURIComponent(serverId)}/drives`, { params: { mount } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system'] })
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+    },
+  })
+  return (
+    <div className="space-y-2 mb-3">
+      {drives.map((d) => (
+        <div key={d.mount} className="rounded-md border border-red-900/60 bg-red-950/40 p-2.5 text-xs">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-medium text-red-300">
+                Missing: {d.label} <span className="text-red-400/70 font-normal">({d.mount}, {formatBytes(d.total)})</span>
+              </p>
+              <p className="text-red-400/70 mt-0.5">Last seen {new Date(d.lastSeen).toLocaleString()}</p>
+            </div>
+            <button
+              onClick={() => {
+                if (window.confirm(`Stop tracking ${d.mount}? Only do this if the drive was removed on purpose.`)) forget.mutate(d.mount)
+              }}
+              disabled={forget.isPending}
+              className="shrink-0 px-2 py-1 rounded border border-red-800 text-red-300 hover:bg-red-900/50 disabled:opacity-50"
+            >
+              Forget
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function ServerCard({ server }: { server: ServerStats }) {
@@ -249,9 +294,10 @@ function ServerCard({ server }: { server: ServerStats }) {
       )}
 
       {/* Disks */}
-      {server.disks.length > 0 && (
+      {(server.disks.length > 0 || !!server.missingDrives?.length) && (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Storage</h3>
+          {!!server.missingDrives?.length && <MissingDrives serverId={server.id} drives={server.missingDrives} />}
           <div className="space-y-3">
             {server.disks.map((disk, i) => (
               <div key={i} className={disk.pool ? 'pb-3 mb-0.5 border-b border-gray-800' : ''}>
