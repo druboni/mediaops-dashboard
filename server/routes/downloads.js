@@ -5,6 +5,7 @@ import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 import { deadReason } from '../deadTorrents.js'
 import { badFileLog } from '../badFiles.js'
 import { getSlskdDownloads, removeSlskdDownload } from '../slskd.js'
+import { fetchArrQueue } from '../arrQueue.js'
 
 function mapQbitState(state) {
   switch (state) {
@@ -176,28 +177,31 @@ async function getArrQueue(url, apiKey, service) {
       // No includeAlbum: album objects make a large Lidarr queue several MB per poll.
       lidarr: 'includeArtist=true',
     }[service]
-    // The whole queue, not just a first page — allHashes below is what stops the
-    // client's auto-delete sweep removing a torrent that is still waiting on import.
-    const endpoint = `${url}/api/${arrApi(service)}/queue?pageSize=1000&${include}`
-    const res = await fetch(endpoint, {
-      headers: { 'X-Api-Key': apiKey, Accept: 'application/json' },
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!res.ok) return { ok: false, importing: [], allHashes: new Set() }
-    const json = await res.json()
-    const records = json.records ?? json ?? []
+    // Two reads of the whole queue (every page; a busy Sonarr passes 1,000
+    // records and finished downloads sort last):
+    //  - every record, without series/episode details, for the download IDs. allHashes
+    //    is what stops the client's auto-delete sweep removing a torrent that is
+    //    still waiting on import, so it must be complete.
+    //  - only finished downloads, with details, for the Importing panel. With
+    //    details the full queue is several MB per poll; finished ones are a few
+    //    hundred records. The status filter is re-applied here in case an older
+    //    *arr ignores it.
+    const [all, finished] = await Promise.all([
+      fetchArrQueue(url, arrApi(service), apiKey, '', 8000),
+      fetchArrQueue(url, arrApi(service), apiKey, `${include}&status=completed`, 8000),
+    ])
 
     // Collect every download ID in the queue (all states) so the client can
     // identify which seeding torrents Sonarr/Radarr is still tracking.
-    const allHashes = new Set(records.map((r) => r.downloadId).filter(Boolean))
+    const allHashes = new Set(all.map((r) => r.downloadId).filter(Boolean))
 
     // Release titles by hash: a magnet that hasn't fetched its metadata yet is
     // named only by its hash in qBittorrent, and the *arr's queue copies that
     // name, so the queue title is only kept when it's a real one.
     const titles = {}
-    for (const r of records) if (r.downloadId) titles[String(r.downloadId).toLowerCase()] = { title: HASH.test(r.title || '') ? null : r.title, service, url, apiKey, downloadId: r.downloadId }
+    for (const r of all) if (r.downloadId) titles[String(r.downloadId).toLowerCase()] = { title: HASH.test(r.title || '') ? null : r.title, service, url, apiKey, downloadId: r.downloadId }
 
-    const blockedRecords = records.filter((r) => {
+    const blockedRecords = finished.filter((r) => {
       const state = r.trackedDownloadState
       // importBlocked = finished downloading but Radarr/Sonarr can't auto-import
       // (e.g. ambiguous release match) — needs the same visibility as active imports.

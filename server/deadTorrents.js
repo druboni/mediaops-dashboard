@@ -1,6 +1,7 @@
 import { getConfig } from './routes/config.js'
 import { addLog } from './logBuffer.js'
 import { getQbitCookie, refreshQbitCookie } from './qbitSession.js'
+import { fetchArrQueue } from './arrQueue.js'
 
 // Dead-torrent replacement: a torrent nobody is sharing never finishes on its
 // own. A magnet with no peers sits in "metaDL" forever, named only by its hash,
@@ -38,15 +39,7 @@ export function deadReason(t, now = Date.now()) {
   return null
 }
 
-async function arrQueue(svc, v) {
-  const res = await fetch(`${svc.url.replace(/\/$/, '')}/api/${v}/queue?pageSize=1000`, {
-    headers: { 'X-Api-Key': svc.apiKey, Accept: 'application/json' },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) throw new Error(`queue HTTP ${res.status}`)
-  const json = await res.json()
-  return json.records ?? json ?? []
-}
+const arrQueue = (svc, v) => fetchArrQueue(svc.url, v, svc.apiKey)
 
 async function qbitTorrents(qbit) {
   const url = qbit.url.replace(/\/$/, '')

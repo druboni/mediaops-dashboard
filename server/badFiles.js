@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { getConfig } from './routes/config.js'
 import { addLog } from './logBuffer.js'
 import { getQbitCookie, refreshQbitCookie } from './qbitSession.js'
+import { fetchArrQueue } from './arrQueue.js'
 
 // Bad-file removal: a TV, movie or music release with a program or an archive
 // inside isn't media. Fake torrents ship "Show.S01E01.1080p.mkv.exe", a
@@ -77,15 +78,7 @@ export function badFileLog(limit = 200) {
   }
 }
 
-async function arrQueue(svc, v) {
-  const res = await fetch(`${svc.url.replace(/\/$/, '')}/api/${v}/queue?pageSize=1000`, {
-    headers: { 'X-Api-Key': svc.apiKey, Accept: 'application/json' },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) throw new Error(`queue HTTP ${res.status}`)
-  const json = await res.json()
-  return json.records ?? json ?? []
-}
+const arrQueue = (svc, v) => fetchArrQueue(svc.url, v, svc.apiKey)
 
 async function qbitGet(qbit, path) {
   const url = qbit.url.replace(/\/$/, '')

@@ -2,6 +2,7 @@ import { statfs } from 'fs/promises'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
 import { missingDrives, driveSize } from '../driveWatch.js'
+import { fetchArrQueue } from '../arrQueue.js'
 
 // Optional — only relevant if you mount your media library volume into the
 // container and want a low-disk-space alert. Defaults to /mnt/plex to match
@@ -90,11 +91,12 @@ export default async function healthRoutes(fastify) {
       ['sonarr', 'radarr']
         .filter((name) => on(name))
         .map(async (name) => {
-          const endpoint = name === 'sonarr'
-            ? '/api/v3/queue?pageSize=100&includeSeries=true&includeEpisode=true'
-            : '/api/v3/queue?pageSize=100&includeMovie=true'
-          const data = await safeFetch(baseUrl(name) + endpoint, apiKey(name))
-          return { name, records: data?.records ?? [] }
+          // Every page: blocked imports are finished downloads, which sort last.
+          const include = name === 'sonarr' ? 'includeSeries=true&includeEpisode=true' : 'includeMovie=true'
+          const records = await fetchArrQueue(baseUrl(name), 'v3', svcs[name].apiKey, `${include}&status=completed`, 8000).catch(() => [])
+          // A season pack is one record per episode: one alert per download, not per episode.
+          const seen = new Set()
+          return { name, records: records.filter((r) => !r.downloadId || (!seen.has(r.downloadId) && seen.add(r.downloadId))) }
         })
     )
     for (const r of blockedResults) {
