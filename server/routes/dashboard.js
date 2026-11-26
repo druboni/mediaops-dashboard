@@ -308,6 +308,26 @@ async function getOverseerrData(url, key) {
   }
 }
 
+// Live library totals straight from Plex. Tautulli's get_libraries_table only refreshes
+// its counts every few hours, so during a big re-download the dashboard lagged by
+// hundreds of items. X-Plex-Container-Size=0 returns just totalSize, so this is cheap.
+// Plex item types: 1 movie, 2 show, 4 episode, 8 artist, 9 album, 10 track.
+async function getPlexLibraryCounts(url, headers) {
+  const sections = await safeFetch(`${url}/library/sections`, { headers })
+  if (!sections.ok) return null
+  const wanted = { movie: { movies: 1 }, show: { shows: 2, episodes: 4 }, artist: { artists: 8, albums: 9, tracks: 10 } }
+  const counts = {}
+  const jobs = []
+  for (const s of sections.data?.MediaContainer?.Directory ?? []) {
+    for (const [field, type] of Object.entries(wanted[s.type] ?? {})) {
+      jobs.push(safeFetch(`${url}/library/sections/${s.key}/all?type=${type}&X-Plex-Container-Start=0&X-Plex-Container-Size=0`, { headers })
+        .then((r) => { if (r.ok) counts[field] = (counts[field] ?? 0) + (r.data?.MediaContainer?.totalSize ?? 0) }))
+    }
+  }
+  await Promise.all(jobs)
+  return Object.keys(counts).length ? counts : null
+}
+
 async function getPlexData(url, token) {
   const headers = { 'X-Plex-Token': token, Accept: 'application/json' }
   const [identity, sessions, accounts, history] = await Promise.all([
@@ -339,6 +359,7 @@ async function getPlexData(url, token) {
 
   return {
     health: identity.ok ? { ok: true, ...(plexVersion ? { version: plexVersion } : {}) } : { ok: false, error: identity.error },
+    libraryCounts: identity.ok ? await getPlexLibraryCounts(url, headers) : null,
     activeStreams: sessions.ok ? (sessions.data.MediaContainer?.size ?? meta.length) : null,
     recentlyPlayed,
     streamDetails: meta.map((m) => {
@@ -532,13 +553,14 @@ export default async function dashboardRoutes(fastify) {
     return {
       health,
       stats: {
-        movies:          tautulli?.movieCount   ?? radarr?.movieCount   ?? null,
-        shows:           tautulli?.showCount    ?? sonarr?.seriesCount  ?? null,
-        episodes:        tautulli?.episodeCount ?? sonarr?.episodeCount ?? null,
-        artists:         tautulli?.musicCount   ?? lidarr?.artistCount  ?? null,
-        // Tautulli counts what's in Plex; Lidarr's album count includes albums it hasn't downloaded.
-        albums:          tautulli?.albumCount   ?? lidarr?.albumCount   ?? null,
-        tracks:          tautulli?.trackCount   ?? null,
+        // Live Plex counts first; Tautulli's are cached for hours. Lidarr's album count
+        // includes albums it hasn't downloaded, so it's the last resort.
+        movies:          plex?.libraryCounts?.movies   ?? tautulli?.movieCount   ?? radarr?.movieCount   ?? null,
+        shows:           plex?.libraryCounts?.shows    ?? tautulli?.showCount    ?? sonarr?.seriesCount  ?? null,
+        episodes:        plex?.libraryCounts?.episodes ?? tautulli?.episodeCount ?? sonarr?.episodeCount ?? null,
+        artists:         plex?.libraryCounts?.artists  ?? tautulli?.musicCount   ?? lidarr?.artistCount  ?? null,
+        albums:          plex?.libraryCounts?.albums   ?? tautulli?.albumCount   ?? lidarr?.albumCount   ?? null,
+        tracks:          plex?.libraryCounts?.tracks   ?? tautulli?.trackCount   ?? null,
         plexStreams:     plex?.activeStreams  ?? null,
         pendingRequests: overseerr?.pendingCount ?? null,
         openIssues:      overseerr?.openIssueCount ?? null,
