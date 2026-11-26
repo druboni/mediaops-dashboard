@@ -60,6 +60,7 @@ interface ServerStats {
   id: string
   name: string
   host: string | null
+  glancesPort?: number
   cpu: CpuInfo | null
   mem: MemInfo | null
   disks: DiskInfo[]
@@ -190,10 +191,21 @@ function MissingDrives({ serverId, drives }: { serverId: string; drives: Missing
 }
 
 function ServerCard({ server }: { server: ServerStats }) {
-  if (!server.host && !server.cpu && !server.mem) {
+  // No CPU and no memory means Glances didn't answer at all. Say so, rather than
+  // showing an empty column, and keep any missing-drive warning visible.
+  if (!server.cpu && !server.mem) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center text-gray-600 text-sm">
-        No data — Glances not reachable on this host
+      <div className="space-y-4">
+        <div className="bg-amber-950/30 border border-amber-800/60 rounded-lg p-4 text-sm">
+          <p className="text-amber-300 font-medium">No stats from this server</p>
+          <p className="text-gray-400 mt-1">
+            Glances isn't answering
+            {server.host ? <> at <span className="font-mono text-gray-300">{server.host}:{server.glancesPort ?? 61208}</span></> : ''}.
+            It may be stopped or crashing on start; <span className="font-mono text-gray-300">systemctl status glances</span> on
+            the server shows why. Drive alerts for this server are paused until it answers.
+          </p>
+        </div>
+        {(server.missingDrives?.length ?? 0) > 0 && <MissingDrives serverId={server.id} drives={server.missingDrives!} />}
       </div>
     )
   }

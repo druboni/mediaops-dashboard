@@ -73,10 +73,14 @@ export async function checkDrives(now = Date.now()) {
   const state = load()
   const events = []
 
+  state.unreachable ??= {}
   for (const s of config.monitoredServers ?? []) {
     if (!s.host) continue
     const drives = await currentDrives(s.host, s.glancesPort || 61208)
-    if (!drives) continue
+    // No answer says nothing about the drives, but it does mean this watch is
+    // blind for that server, which glancesDown() reports.
+    if (!drives) { state.unreachable[s.id] ??= now; continue }
+    delete state.unreachable[s.id]
     const known = (state.servers[s.id] ??= {})
     const seen = new Set()
 
@@ -126,6 +130,11 @@ export function missingDrives() {
     if (missing.length) out[serverId] = missing
   }
   return out
+}
+
+/** Since when (ms) each server's Glances has not answered, by server id. */
+export function glancesDown() {
+  return { ...(load().unreachable ?? {}) }
 }
 
 /** Stops tracking a drive that was removed on purpose. */

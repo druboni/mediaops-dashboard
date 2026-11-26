@@ -1,7 +1,7 @@
 import { statfs } from 'fs/promises'
 import { requireAuth } from '../middleware/auth.js'
 import { getConfig } from './config.js'
-import { missingDrives, driveSize } from '../driveWatch.js'
+import { missingDrives, driveSize, glancesDown } from '../driveWatch.js'
 import { fetchArrQueue } from '../arrQueue.js'
 
 // Optional — only relevant if you mount your media library volume into the
@@ -65,6 +65,19 @@ export default async function healthRoutes(fastify) {
         alerts.push({
           service: 'storage', level: 'error', source: 'drive',
           message: `Drive missing on ${s.name}: ${d.label} (${d.mount}, ${driveSize(d.total)}). Details on the System page`,
+        })
+      }
+    }
+
+    // A server whose Glances stopped answering: no CPU/disk stats, and the drive
+    // watch can't see its drives. Ten minutes (two drive checks) so a restart
+    // doesn't raise it. No duration in the text, so a dismissal sticks.
+    const down = glancesDown()
+    for (const s of config.monitoredServers ?? []) {
+      if (down[s.id] && Date.now() - down[s.id] >= 10 * 60_000) {
+        alerts.push({
+          service: 'system', level: 'warning', source: 'glances',
+          message: `No stats from ${s.name}: Glances isn't answering at ${s.host}:${s.glancesPort || 61208}, so drive alerts for it are paused`,
         })
       }
     }

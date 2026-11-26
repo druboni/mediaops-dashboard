@@ -413,6 +413,7 @@ export default async function systemRoutes(fastify) {
             id: s.id,
             name: s.name,
             host: s.host,
+            glancesPort: s.glancesPort || 61208,
             ...restStats,
             gpu: customGpu ?? nativeGpu,
             hasSpeedtest: !!s.speedtestPort,
