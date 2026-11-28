@@ -6,6 +6,7 @@ import { addLog } from '../logBuffer.js'
 import { getQbitSid, refreshQbitCookie } from '../qbitSession.js'
 import { getSlskdDashboard } from '../slskd.js'
 import { dockerApiGet } from './system.js'
+import { getRecovery } from '../recovery.js'
 
 // See server/routes/health.js for the full explanation — same optional mount path.
 const PLEX_MOUNT_PATH = process.env.PLEX_MOUNT_PATH || '/mnt/plex'
@@ -472,7 +473,7 @@ export default async function dashboardRoutes(fastify) {
 
     const [radarr, sonarr, lidarr, bazarr, overseerr, prowlarr, jackett, plex, qbit, nzbget, nzbgetMusic, huntarr, requestrr, tautulli, plexDisk,
       qbitMam, listenarr, listenarrMam, audiobookshelf, audiobookRequester,
-      audiobookshelfDemo, homeshelfWeb, plexampRequester, wizarr, slskd, soularr, musicRequests, audiobooks] =
+      audiobookshelfDemo, homeshelfWeb, plexampRequester, wizarr, slskd, soularr, musicRequests, audiobooks, recovery] =
       (await Promise.allSettled([
         on('radarr')      ? getRadarrData(at('radarr').url, at('radarr').key)             : null,
         on('sonarr')      ? getSonarrData(at('sonarr').url, at('sonarr').key)             : null,
@@ -502,6 +503,7 @@ export default async function dashboardRoutes(fastify) {
         on('soularr')      ? withVersion(getSimpleHealth(at('soularr').url, '/'), imageVersion('soularr')) : null,
         on('plexampRequester') ? getMusicRequests(at('plexampRequester').url, at('plexampRequester').key) : null,
         getAudiobooks(svcs, on, at),
+        on('plex') ? getRecovery() : null,
       ])).map((r) => (r.status === 'fulfilled' ? r.value : null))
 
     const health = {}
@@ -583,6 +585,7 @@ export default async function dashboardRoutes(fastify) {
       openIssues: overseerr?.openIssues || [],
       musicRequests,
       audiobooks,
+      recovery,
     }
   })
 }

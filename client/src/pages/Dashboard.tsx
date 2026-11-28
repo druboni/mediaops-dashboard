@@ -44,6 +44,17 @@ interface DashboardData {
   }[]
   musicRequests?: MusicRequests | { error: string } | null
   audiobooks?: Audiobooks | null
+  recovery?: Recovery | null
+}
+
+// server/recovery.js — how much of a pre-failure Plex snapshot is back.
+interface Recovery {
+  label: string | null
+  takenAt: string | null
+  checkedAt: string
+  percent: number
+  movies: { back: number; total: number }
+  episodes: { back: number; total: number }
 }
 
 // Audiobook Requester's /api/stats plus Listenarr's wanted books and who's
@@ -348,6 +359,8 @@ export default function Dashboard() {
           ))}
         </div>
       </section>
+
+      {data.recovery && <RecoverySection data={data.recovery} />}
 
       {/* Library Stats */}
       <section className="mb-8">
@@ -766,6 +779,53 @@ function ListeningSection({ sessions }: { sessions: Audiobooks['listening'] }) {
         })}
       </div>
     </section>
+  )
+}
+
+// ── Recovery ───────────────────────────────────────────────────────────
+function RecoverySection({ data }: { data: Recovery }) {
+  const done = data.percent >= 99.9
+  const taken = data.takenAt
+    ? new Date(data.takenAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null
+  return (
+    <section className="mb-8">
+      <h2 className="section-label">Recovery</h2>
+      <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="sm:w-44 shrink-0">
+          <p className={`text-4xl font-bold tabular-nums ${done ? 'text-green-400' : 'text-white'}`}>{data.percent.toFixed(1)}%</p>
+          <p className="text-xs text-gray-500 mt-1">
+            of the library{taken ? ` as of ${taken}` : ''} is back
+          </p>
+        </div>
+        <div className="flex-1 min-w-0 space-y-3">
+          <RecoveryBar label="TV episodes" back={data.episodes.back} total={data.episodes.total} />
+          <RecoveryBar label="Movies" back={data.movies.back} total={data.movies.total} />
+          <p className="text-[11px] text-gray-600">
+            {data.label ? `${data.label} · ` : ''}checked {timeAgo(data.checkedAt)} · new additions since don't count
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function RecoveryBar({ label, back, total }: { label: string; back: number; total: number }) {
+  const pct = total > 0 ? (back / total) * 100 : 100
+  const missing = total - back
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-gray-300">{label}</span>
+        <span className="text-gray-500 tabular-nums truncate">
+          {back.toLocaleString()} / {total.toLocaleString()}
+          {missing > 0 && <span className="text-gray-600"> · {missing.toLocaleString()} to go</span>}
+        </span>
+      </div>
+      <div className="mt-1 h-2 rounded-full bg-gray-800 overflow-hidden">
+        <div className={`h-full rounded-full ${pct >= 99.9 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+    </div>
   )
 }
 
